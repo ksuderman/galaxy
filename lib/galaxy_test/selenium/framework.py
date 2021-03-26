@@ -39,7 +39,7 @@ except ImportError:
 DEFAULT_TIMEOUT_MULTIPLIER = 1
 DEFAULT_TEST_ERRORS_DIRECTORY = os.path.abspath("database/test_errors")
 DEFAULT_SELENIUM_HEADLESS = "auto"
-DEFAULT_ADMIN_USER = "test@bx.psu.edu"
+DEFAULT_ADMIN_USER = "alex@fake.org"
 DEFAULT_ADMIN_PASSWORD = "testpass"
 DEFAULT_DOWNLOAD_PATH = driver_factory.DEFAULT_DOWNLOAD_PATH
 
@@ -293,6 +293,7 @@ class TestWithSeleniumMixin(GalaxySeleniumContext, UsesApiTestCaseMixin):
         self.driver.execute_script(SETUP_LOGGING_JS)
 
     def login(self):
+
         if GALAXY_TEST_SELENIUM_USER_EMAIL:
             assert GALAXY_TEST_SELENIUM_USER_PASSWORD, "If GALAXY_TEST_SELENIUM_USER_EMAIL is set, a password must be set also with GALAXY_TEST_SELENIUM_USER_PASSWORD"
             self.home()
@@ -384,7 +385,7 @@ class TestWithSeleniumMixin(GalaxySeleniumContext, UsesApiTestCaseMixin):
 
 class SeleniumTestCase(FunctionalTestCase, TestWithSeleniumMixin):
     galaxy_driver_class = GalaxyTestDriver
-
+    single_user = True
     def setUp(self):
         super().setUp()
         self.setup_selenium()

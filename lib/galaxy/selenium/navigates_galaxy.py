@@ -33,6 +33,7 @@ RETRY_DURING_TRANSITIONS_ATTEMPTS_DEFAULT = 10
 
 WaitType = collections.namedtuple("WaitType", ["name", "default_length"])
 
+single_user=True
 
 # Default wait times should make sense for a development server under low
 # load. Wait times for production servers can be scaled up with a multiplier.
@@ -422,6 +423,9 @@ class NavigatesGalaxy(HasDriver):
         return ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(len))
 
     def submit_login(self, email, password=None, assert_valid=True, retries=0):
+        self.snapshot("Fake login, just accept on Anvil")
+        return
+
         if password is None:
             password = self.default_password
         login_info = {
@@ -447,6 +451,9 @@ class NavigatesGalaxy(HasDriver):
             self.snapshot("logged-in")
 
     def register(self, email=None, password=None, username=None, confirm=None, assert_valid=True):
+        self.snapshot("Fake registration. Just return")
+        return
+
         if email is None:
             email = self._get_random_email()
         if password is None:
@@ -1357,11 +1364,16 @@ class NavigatesGalaxy(HasDriver):
         first_datset_forward.click()
 
     def logout_if_needed(self):
+        if single_user:
+            return
+
         if self.is_logged_in():
             self.home()
             self.logout()
 
     def logout(self):
+        if single_user:
+            return
         self.components.masthead.logged_in_only.wait_for_visible()
         self.click_masthead_user()
         self.components.masthead.logout.wait_for_and_click()
