@@ -184,3 +184,4 @@ config/plugins/visualizations/**/static/dist
 config/plugins/visualizations/**/static/script.js
 config/plugins/visualizations/**/static/main.css
 config/plugins/visualizations/**/static/plugin_build_hash.txt
+*.tgz
