@@ -405,6 +405,11 @@ do
               shift 1
           fi
           ;;
+      -single|-single_user_mode|--single_user_mode|--single-user-mode)
+          GALAXY_TEST_SELENIUM_SINGLE_USER_MODE=True
+          export GALAXY_TEST_SELENIUM_SINGLE_USER_MODE
+          shift
+          ;;
       -t|-toolshed|--toolshed)
           test_script="./lib/tool_shed/test/functional_tests.py"
           report_file="run_toolshed_tests.html"

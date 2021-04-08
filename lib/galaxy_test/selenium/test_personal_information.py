@@ -1,5 +1,6 @@
 from .framework import (
     selenium_test,
+    skip_if_single_user_mode,
     SeleniumTestCase,
 )
 
@@ -31,6 +32,7 @@ class ManageInformationTestCase(SeleniumTestCase):
         self.assertEqual(new_api_key, api_key_input.get_property('value'))
 
     @selenium_test
+    @skip_if_single_user_mode
     def test_change_email(self):
         def assert_email(email_to_check):
             self.assertTrue(email_to_check == self.driver.find_element_by_id("user-preferences-current-email").text)
@@ -61,6 +63,7 @@ class ManageInformationTestCase(SeleniumTestCase):
         assert_email(new_email)
 
     @selenium_test
+    @skip_if_single_user_mode
     def test_public_name(self):
         def get_name_input_field():
             return self.driver.find_element_by_css_selector("[tour_id='username'] input")
@@ -88,6 +91,7 @@ class ManageInformationTestCase(SeleniumTestCase):
         assert_public_name(new_public_name)
 
     @selenium_test
+    @skip_if_single_user_mode
     def test_user_address(self):
         def get_address_form():
             return self.driver.find_element_by_css_selector("div.ui-portlet-section > div.portlet-content")

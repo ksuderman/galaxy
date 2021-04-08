@@ -5,6 +5,10 @@ description: >-
   In this tutorial, we will compare an assembly of <i>E. coli</i> C to
   assemblies of all other complete genes of this species.
 title_default: ecoli_comparison
+tags:
+  - assembly
+  - comparison
+  - ui
 steps:
   - title: Introduction
     content: >-

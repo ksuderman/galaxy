@@ -1,6 +1,7 @@
 from galaxy_test.base.populators import flakey
 from .framework import (
     selenium_test,
+    skip_if_single_user_mode,
     SeleniumTestCase,
 )
 
@@ -145,6 +146,7 @@ class AdminAppTestCase(SeleniumTestCase):
         self.screenshot("admin_local_data")
 
     @selenium_test
+    @skip_if_single_user_mode
     def test_admin_user_display(self):
         admin_component = self.components.admin
         self.admin_login()

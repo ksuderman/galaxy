@@ -1,12 +1,13 @@
 from .framework import (
     selenium_test,
+    skip_if_single_user_mode,
     SeleniumTestCase
 )
 
 # Remove hack when submit_login works more consistently.
 VALID_LOGIN_RETRIES = 3
 
-
+@skip_if_single_user_mode
 class HistorySharingTestCase(SeleniumTestCase):
 
     @selenium_test

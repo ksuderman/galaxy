@@ -1,9 +1,10 @@
 from .framework import (
     selenium_test,
+    skip_if_single_user_mode,
     SeleniumTestCase
 )
 
-
+@skip_if_single_user_mode
 class SignOutTestCase(SeleniumTestCase):
     @selenium_test
     def test_sign_out(self):

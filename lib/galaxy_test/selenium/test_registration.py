@@ -1,9 +1,10 @@
 from .framework import (
     selenium_test,
+    skip_if_single_user_mode,
     SeleniumTestCase
 )
 
-
+@skip_if_single_user_mode
 class RegistrationTestCase(SeleniumTestCase):
 
     @selenium_test
