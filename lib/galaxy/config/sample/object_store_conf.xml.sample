@@ -1,6 +1,16 @@
 <?xml version="1.0"?>
 <object_store type="hierarchical">
     <backends>
+        <object_store type="irods" id="primary" order="1">
+            <auth username="rods" password="rods" />
+            <resource name="demoResc" />
+            <zone name="tempZone" />
+            <connection host="35.190.158.130" port="1247" timeout="30" poolsize="3" refresh_time="300"/>
+            <cache path="database/object_store_cache_irods" size="100" />
+            <extra_dir type="job_work" path="database/job_working_directory_irods"/>
+            <extra_dir type="temp" path="database/tmp_irods"/>
+        </object_store>
+
         <!-- In distributed and hierarchical world, you can choose that some
              backends are automatically unused whenever they become too full.
              Setting the maxpctfull attribute (on top level object_store it
@@ -8,6 +18,7 @@
              backends to override a global setting. This only applies to disk
              based backends and not remote object stores.
              -->
+        <!--
         <object_store type="distributed" id="primary" order="0" maxpctfull="90">
             <backends>
                 <backend id="files1" type="disk" weight="1">
@@ -27,6 +38,7 @@
             <extra_dir type="temp" path="database/tmp3"/>
             <extra_dir type="job_work" path="database/job_working_directory3"/>
         </object_store>
+        -->
 
         <!-- Sample S3 Object Store
              The "size" attribute of <cache> is in gigabytes.
