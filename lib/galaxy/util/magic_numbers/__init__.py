@@ -13,7 +13,7 @@ class MagicNumber:
     '''
     def __init__(self, number, extension, description):
         self.number = number
-        self.bytes = [ int(hex, 16) for hex in number.split() if hex != '??']
+        self.bytes = [int(hex, 16) for hex in number.split() if hex != '??']
         self.extension = extension.strip()
         self.description = description.strip()
 
@@ -51,7 +51,7 @@ class MagicNumberSniffer:
                 self.add(number)
 
 
-    def add(self, number: MagicNumber):
+    def _add(self, number: MagicNumber):
         index = 0
         current = self.root
         while index < len(number.bytes):

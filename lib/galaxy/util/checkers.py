@@ -8,10 +8,9 @@ from io import (
     BytesIO,
     StringIO
 )
-#import magic_numbers
-from galaxy.util import magic_numbers
 
 from galaxy import util
+from galaxy.util import magic_numbers
 from galaxy.util.image_util import image_type
 
 HTML_CHECK_LINES = 100
