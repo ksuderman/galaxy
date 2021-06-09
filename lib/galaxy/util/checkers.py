@@ -8,6 +8,7 @@ from io import (
     BytesIO,
     StringIO
 )
+import magic_numbers
 
 from galaxy import util
 from galaxy.util.image_util import image_type
@@ -22,6 +23,7 @@ HTML_REGEXPS = (
     re.compile(r"<SCRIPT[^>]*>", re.I),
 )
 
+trie = magic_numbers.MagicNumberSniffer()
 
 def check_html(name, file_path=True):
     """
@@ -50,14 +52,15 @@ def check_binary(name, file_path=True):
     # Handles files if file_path is True or text if file_path is False
     if file_path:
         temp = open(name, "rb")
-        size = os.stat(name).st_size
     else:
         temp = BytesIO(name)
-        size = len(name)
-    read_start = int(size / 2)
+
     read_length = 1024
     try:
-        if util.is_binary(temp.read(read_length)):
+        buff = temp.read(read_length)
+        if len(trie.sniff(buff, False)) > 0:
+            return True
+        if util.is_binary(buff):
             return True
         # Some binary files have text only within the first 1024
         # Read 1024 from the middle of the file if this is not
@@ -65,6 +68,12 @@ def check_binary(name, file_path=True):
         # to avoid issues with long txt headers on binary files.
         if file_path and not is_gzip(name) and not is_zip(name) and not is_bz2(name):
             # file_path=False doesn't seem to be used in the codebase
+            size = os.stat(name).st_size
+            read_start = int(size / 2)
+            temp.seek(read_start)
+            return util.is_binary(temp.read(read_length))
+        if not file_path:
+            read_start = len(name) / 2
             temp.seek(read_start)
             return util.is_binary(temp.read(read_length))
         return False
