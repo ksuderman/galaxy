@@ -1,5 +1,4 @@
 import os
-import io
 
 # The number of bytes to be read from a file/stream when searching for a
 # magic number.  No magic number is even close to this long, but given most

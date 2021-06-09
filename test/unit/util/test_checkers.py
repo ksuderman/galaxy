@@ -1,12 +1,12 @@
 import os
 import tempfile
 
-from galaxy.util.checkers import check_html, check_binary
-import galaxy.util.checkers as check
+from galaxy.util.checkers import check_binary, check_html
 
 # This is less than ideal as tests will break when test data files are added
 # or removed.
 EXPECTED_NUMBER_OF_BINARY_FILES = 94
+
 
 def test_check_html():
     html_text = '<p>\n<a href="url">Link</a>\n</p>\n'
@@ -30,7 +30,7 @@ def test_check_binary():
     assert check_binary(b'FCS2.0.........', False)
     assert check_binary(b'FCS1.0.........', False)
     assert check_binary(b'FCS............', False)
-    assert check_binary(b'%PDF-...........',False)
+    assert check_binary(b'%PDF-..........', False)
     assert not check_binary(b'FC.........', False)
     assert not check_binary(b'Hello world', False)
 
@@ -43,4 +43,3 @@ def test_check_binary_files():
         if check_binary(os.path.join(test_data_dir, f)):
             count += 1
     assert count == EXPECTED_NUMBER_OF_BINARY_FILES
-

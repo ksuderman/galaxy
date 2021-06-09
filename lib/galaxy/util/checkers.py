@@ -25,6 +25,7 @@ HTML_REGEXPS = (
 
 trie = magic_numbers.MagicNumberSniffer()
 
+
 def check_html(name, file_path=True):
     """
     Returns True if the file/string contains HTML code.
