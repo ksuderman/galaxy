@@ -8,7 +8,8 @@ from io import (
     BytesIO,
     StringIO
 )
-import magic_numbers
+#import magic_numbers
+from galaxy.util import magic_numbers
 
 from galaxy import util
 from galaxy.util.image_util import image_type
