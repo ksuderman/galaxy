@@ -22,8 +22,8 @@ class TrieNode:
     '''
     A node in the search tree.
 
-    If the formats list is not empty then the sequence of bytes that led to this
-    node is a known magic number.
+    If the formats list is not empty then the sequence of bytes that led to
+    this node is a known magic number.
     '''
     def __init__(self):
         self.children = [None] * 256
@@ -42,14 +42,13 @@ class MagicNumberSniffer:
             for line in fp:
                 parts = line.split('\t')
                 number = MagicNumber(*parts)
-                self.add(number)
+                self._add(number)
         with open(os.path.join(this_dir, "magic-numbers.txt")) as fp:
             for line in fp:
                 parts = line.split('\t')
                 bytes = ' '.join(hex(ord(c)).replace('0x', '') for c in parts[0])
                 number = MagicNumber(bytes, parts[1], parts[2])
-                self.add(number)
-
+                self._add(number)
 
     def _add(self, number: MagicNumber):
         index = 0
@@ -65,15 +64,12 @@ class MagicNumberSniffer:
             index += 1
         current.formats.append(number)
 
-
-    def sniff(self, path, isFile=True):
-        if isFile:
+    def sniff(self, path, is_file=True):
+        if is_file:
             with open(path, 'rb') as f:
                 buff = f.read(BLOCK_SIZE)
         else:
             buff = path
-
-        p = 0  # pointer into the above buffer
 
         # Walk the search tree using the bytes in `buff` as the indices.
         current = self.root
@@ -88,4 +84,4 @@ class MagicNumberSniffer:
         return current.formats
 
 
-__all__ = [ 'MagicNumberSniffer', 'MagicNumber' ]
+__all__ = ['MagicNumberSniffer', 'MagicNumber']

@@ -73,7 +73,7 @@ def check_binary(name, file_path=True):
             temp.seek(read_start)
             return util.is_binary(temp.read(read_length))
         if not file_path:
-            read_start = len(name) / 2
+            read_start = int(len(name) / 2)
             temp.seek(read_start)
             return util.is_binary(temp.read(read_length))
         return False
