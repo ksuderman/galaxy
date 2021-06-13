@@ -1,8 +1,6 @@
 CRAM	cram	cram files
-<phyloxml	xml	phylo XML files
 OXLI	oxli	oxli
 TRACK	trk	Track files for tracking things
-%%Matrix	mtx	Matrix files
 RIFF	wav	Why does our wav file use a different magic number?
 FCS3.1	fcs	FCS 3.1
 FCS3.0	fcs	FCS 3.0
