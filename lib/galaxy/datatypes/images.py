@@ -334,14 +334,10 @@ class Mrc2014(Binary):
         # Handle the wierdness of mrcfile:
         # https://github.com/ccpem/mrcfile/blob/master/mrcfile/validator.py#L88
         try:
-            # An exception is thrown
-            # if the file is not an
-            # mrc2014 file.
-            if mrcfile.validate(filename, print_file=StringIO()):
-                return True
-        except Exception:
+            with mrcfile.load_functions.open(filepath, permissive=False) as mrc:
+                return mrc.validate(print_file=StringIO())
+        except ValueError:
             return False
-        return False
 
 
 class Gmaj(data.Data):
