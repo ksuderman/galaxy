@@ -2221,12 +2221,9 @@ class JobWrapper(HasResourceParameters):
     @property
     def user(self):
         job = self.get_job()
-        if job.user is not None:
-            return job.user.email
-        elif job.galaxy_session is not None and job.galaxy_session.user is not None:
-            return job.galaxy_session.user.email
-        elif job.history is not None and job.history.user is not None:
-            return job.history.user.email
+        user_email = job.get_user_email()
+        if user_email:
+            return user_email
         elif job.galaxy_session is not None:
             return f"anonymous@{job.galaxy_session.remote_addr.split()[-1]}"
         else:
@@ -2261,10 +2258,10 @@ class JobWrapper(HasResourceParameters):
         method should be removed ASAP and replaced with some properly generic
         and stateful way of determining link-only datasets. -nate
         """
-        if self.tool:
+        if self.tool and self.tool.id == 'upload1':
             job = self.get_job()
             param_dict = job.get_param_values(self.app)
-            return self.tool.id == 'upload1' and param_dict.get('link_data_only', None) == 'link_to_files'
+            return param_dict.get('link_data_only') == 'link_to_files'
         else:
             # The tool is unavailable, we try to move the outputs.
             return False

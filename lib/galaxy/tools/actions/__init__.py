@@ -623,6 +623,8 @@ class DefaultToolAction:
                 assert old_job.session_id == galaxy_session.id, f'({old_job.id}/{current_job.id}): Old session id ({old_job.session_id}) does not match rerun session id ({galaxy_session.id})'
             else:
                 raise Exception(f'({old_job.id}/{current_job.id}): Remapping via the API is not (yet) supported')
+            # Start by hiding current job outputs before taking over the old job's (implicit) outputs.
+            current_job.hide_outputs(flush=False)
             # Duplicate PJAs before remap.
             for pjaa in old_job.post_job_actions:
                 current_job.add_post_job_action(pjaa.post_job_action)
@@ -658,9 +660,9 @@ class DefaultToolAction:
                     for job in hdca.implicit_collection_jobs.jobs:
                         if job.job_id == old_job.id:
                             job.job_id = current_job.id
+                hdca.update()
             for jtoidca in old_job.output_dataset_collections:
                 jtoidca.dataset_collection.replace_failed_elements(remapped_hdas)
-            current_job.hide_outputs(flush=False)
         except Exception:
             log.exception('Cannot remap rerun dependencies.')
 
@@ -673,12 +675,13 @@ class DefaultToolAction:
         return remapped_hdas
 
     def __remap_parameters(self, job_to_remap, jtid, jtod, out_data):
-        input_values = {p.name: json.loads(p.value) for p in job_to_remap.parameters}
+        input_values = {p.name: json.loads(p.value) for p in job_to_remap.parameters if p.value is not None}
         old_dataset_id = jtod.dataset_id
         new_dataset_id = out_data[jtod.name].id
         input_values = update_dataset_ids(input_values, {old_dataset_id: new_dataset_id}, src='hda')
         for p in job_to_remap.parameters:
-            p.value = json.dumps(input_values[p.name])
+            if p.name in input_values:
+                p.value = json.dumps(input_values[p.name])
         jtid.dataset = out_data[jtod.name]
         jtid.dataset.hid = jtod.dataset.hid
         log.info(f'Job {job_to_remap.id} input HDA {jtod.dataset.id} remapped to new HDA {jtid.dataset.id}')

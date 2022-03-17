@@ -32,6 +32,7 @@ import logging
 import re
 import signal
 import time
+from math import inf
 
 from galaxy.jobs.runners.drmaa import DRMAAJobRunner
 from galaxy.util import (
@@ -80,7 +81,7 @@ class UnivaJobRunner(DRMAAJobRunner):
         if state in [self.drmaa.JobState.DONE, self.drmaa.JobState.FAILED]:
             # get configured job destination
             job_destination = ajs.job_wrapper.job_destination
-            native_spec = job_destination.params.get('nativeSpecification', None)
+            native_spec = job_destination.params.get('nativeSpecification', '')
             # determine time and memory that was granted for the job
             time_granted, mem_granted = _parse_native_specs(ajs.job_id, native_spec)
             time_wasted = extinfo["time_wasted"]
@@ -566,8 +567,8 @@ def _parse_native_specs(job_id, native_spec):
     specification string passed to GE
     return time,mem (or None,None if nothing found)
     """
-    tme = None
-    mem = None
+    tme = inf
+    mem = inf
     # parse time
     m = re.search(r"rt=([0-9:]+)[\s,]*", native_spec)
     if m is not None:
