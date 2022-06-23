@@ -1,4 +1,4 @@
-name: Build Image
+name: Build AnVIL Image
 on: push
 jobs:
   test:
