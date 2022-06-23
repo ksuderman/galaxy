@@ -72,7 +72,7 @@ COPY . $SERVER_DIR/
 FROM stage1 AS server_build
 ARG SERVER_DIR
 
-RUN ansible-playbook -i localhost, playbook.yml -v -e galaxy_build_client=False -e galaxy_virtualenv_command=virtualenv
+RUN ansible-playbook -i localhost, playbook.yml -v -e galaxy_build_client=False -e galaxy_virtualenv_command=virtualenv -e galaxy_systemd_mode=no
 
 RUN cat /galaxy/server/lib/galaxy/dependencies/conditional-requirements.txt | grep psycopg2-binary | xargs /galaxy/server/.venv/bin/pip install
 
