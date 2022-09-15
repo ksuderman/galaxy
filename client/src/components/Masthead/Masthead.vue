@@ -1,10 +1,26 @@
 <template>
     <b-navbar id="masthead" type="dark" role="navigation" aria-label="Main" class="justify-content-center">
-        <b-navbar-brand :href="brandLink" aria-label="homepage">
-            <img alt="logo" class="navbar-brand-image" :src="brandImage" />
-            <img v-if="brandImageSecondary" alt="logo" class="navbar-brand-image" :src="brandImageSecondary" />
-            <span class="navbar-brand-title">{{ brandTitle }}</span>
+        <b-navbar-brand @click="showNavGuard" :href="anvilLink" aria-label="homepage">
+            <img alt="Galaxy Logo" style="padding-top: 0.4rem;" class="navbar-brand-image" :src="galaxyLogoSrc" />
+            <img alt="Anvil Logo" class="navbar-brand-image" :src="anvilLogoSrc" />
         </b-navbar-brand>
+
+        <b-modal ref="navGuardModal" hide-footer title="A quick note before you go">
+            <div>
+                <p>
+                    You are navigating away from Galaxy, which will continue to run in the background. Any jobs you have
+                    running will continue, but it's important to keep in mind that this instance will also continue
+                    potentially incurring costs. Remember to shut down Galaxy when you are done.
+                </p>
+                <p>
+                    This modal will not be shown again.
+                </p>
+            </div>
+            <b-button variant="primary" block @click="confirmNav">
+                I understand, take me back to my AnVIL Dashboard
+            </b-button>
+        </b-modal>
+
         <b-navbar-nav>
             <masthead-item
                 v-for="(tab, idx) in tabs"
@@ -23,6 +39,7 @@ import { BNavbar, BNavbarBrand, BNavbarNav } from "bootstrap-vue";
 import MastheadItem from "./MastheadItem";
 import { fetchMenu } from "layout/menu";
 import { loadWebhookMenuItems } from "./_webhooks";
+import { getAppRoot } from "onload/loadConfig";
 
 export default {
     name: "Masthead",
@@ -66,11 +83,56 @@ export default {
             default: null,
         },
     },
+    components: {
+        BNavbar,
+        BNavbarBrand,
+        BNavbarNav,
+        MastheadItem,
+    },
+    methods: {
+        addItem(item) {
+            this.tabs.push(item);
+        },
+        highlight(activeTab) {
+            this.activeTab = activeTab;
+        },
+        _tabToJson(el) {
+            const defaults = {
+                visible: true,
+                target: "_parent",
+            };
+            let asJson;
+            if (el.toJSON instanceof Function) {
+                asJson = el.toJSON();
+            } else {
+                asJson = el;
+            }
+            return Object.assign({}, defaults, asJson);
+        },
+        _reflectScratchbookFrames() {
+            const frames = this.mastheadState.frame.getFrames();
+            const tab = this.mastheadState.frame.buttonLoad;
+            tab.toggle = frames.visible;
+            tab.icon = (frames.visible && "fa-eye") || "fa-eye-slash";
+        },
+        showNavGuard(ev) {
+            const dismissNavGuard = localStorage.getItem("dismissNavGuard");
+            if (!dismissNavGuard === true) {
+                this.$refs.navGuardModal.show();
+                ev.preventDefault();
+            }
+        },
+        confirmNav() {
+            localStorage.setItem("dismissNavGuard", true);
+            window.location = this.anvilLink;
+        },
+    },
     data() {
         return {
             activeTab: null,
             baseTabs: [],
             extensionTabs: [],
+            anvilLink: "https://anvil.terra.bio",
         };
     },
     computed: {
@@ -85,6 +147,12 @@ export default {
             const windowTabs = [this.mastheadState.windowManager.buttonActive];
             const tabs = [].concat(this.baseTabs, this.extensionTabs, windowTabs);
             return tabs.map(this._tabToJson);
+        },
+        anvilLogoSrc() {
+            return `${getAppRoot()}static/images/anvilwhite.png`;
+        },
+        galaxyLogoSrc() {
+            return `${getAppRoot()}static/images/galaxy_project_logo_white_square.png`;
         },
     },
     created() {

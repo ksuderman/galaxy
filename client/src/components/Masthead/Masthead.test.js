@@ -91,12 +91,8 @@ describe("Masthead.vue", () => {
         });
     });
 
-    it("should disable brand when displayGalaxyBrand is true", async () => {
-        expect(wrapper.find(".navbar-brand-title").text()).toBe("Galaxy");
-        await wrapper.setProps({ brand: "Foo " });
-        expect(wrapper.find(".navbar-brand-title").text()).toBe("Galaxy Foo");
-        await wrapper.setProps({ displayGalaxyBrand: false });
-        expect(wrapper.find(".navbar-brand-title").text()).toBe("Foo");
+    it("should display anvil logo instead of brand configuration", async () => {
+        expect(wrapper.findAll(".navbar-brand-image").length).toBe(2);
     });
 
     it("set quota element and renders it", () => {
