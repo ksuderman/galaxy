@@ -41,4 +41,4 @@ jobs:
       - name: Push to quay.io
         uses: actions-hub/docker@master
         with:
-          args: push quay.io/galaxy-k8s/galaxy-anvil:${{ github.event.inputs.version }}
+          args: push quay.io/galaxyproject/galaxy-anvil:${{ github.event.inputs.version }}
