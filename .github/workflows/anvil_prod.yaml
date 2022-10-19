@@ -31,7 +31,7 @@ jobs:
       - name: Tag image
         run: |
           docker tag galaxy/galaxy-anvil:${{ github.event.inputs.version }}-auto galaxy/galaxy-anvil:${{ github.event.inputs.version }} &&
-          docker tag galaxy/galaxy-anvil:${{ github.event.inputs.version }}-auto quay.io/galaxy-k8s/galaxy-anvil:${{ github.event.inputs.version }}
+          docker tag galaxy/galaxy-anvil:${{ github.event.inputs.version }}-auto quay.io/galaxyproject/galaxy-anvil:${{ github.event.inputs.version }}
 
       - name: Push to Docker Hub
         uses: actions-hub/docker@master
