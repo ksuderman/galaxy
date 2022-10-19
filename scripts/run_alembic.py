@@ -1,8 +1,9 @@
+#!/usr/bin/env python
+
 """
-This script retrieves relevant configuration values and invokes
-the Alembic console runner.
-It is wrapped by run_alembic.sh (see that file for usage).
+This script is intended to be invoked by the scripts/run_alembic.sh script.
 """
+
 import logging
 import os.path
 import sys
@@ -18,8 +19,12 @@ from galaxy.model.migrations.scripts import (
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
+ALEMBIC_CONFIG = "lib/galaxy/model/migrations/alembic.ini"
+
 
 def run():
+    sys.argv.insert(1, "--config")
+    sys.argv.insert(2, ALEMBIC_CONFIG)
     gxy_config, tsi_config, _ = get_configuration(sys.argv, os.getcwd())
     add_db_urls_to_command_arguments(sys.argv, gxy_config.url, tsi_config.url)
     invoke_alembic()
