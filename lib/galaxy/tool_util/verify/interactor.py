@@ -11,7 +11,11 @@ import urllib.parse
 import zipfile
 from json import dumps
 from logging import getLogger
-from typing import Optional
+from typing import (
+    Any,
+    Dict,
+    Optional,
+)
 
 import requests
 from packaging.version import parse as parse_version
@@ -810,6 +814,15 @@ class GalaxyInteractorApi:
         # no data for GET
         return requests.get(url, params=data, headers=headers, timeout=util.DEFAULT_SOCKET_TIMEOUT, **kwargs)
 
+    def _head(self, path, data=None, key=None, headers=None, admin=False, anon=False):
+        headers = self.api_key_header(key=key, admin=admin, anon=anon, headers=headers)
+        url = self.get_api_url(path)
+        kwargs: Dict[str, Any] = {}
+        if self.cookies:
+            kwargs["cookies"] = self.cookies
+        # no data for HEAD
+        return requests.head(url, params=data, headers=headers, timeout=util.DEFAULT_SOCKET_TIMEOUT, **kwargs)
+
     def get_api_url(self, path: str) -> str:
         if path.startswith("http"):
             return path
@@ -1274,7 +1287,11 @@ def verify_tool(
                 job_data["execution_problem"] = util.unicodify(tool_execution_exception)
                 dynamic_param_error = getattr(tool_execution_exception, "dynamic_param_error", False)
                 job_data["dynamic_param_error"] = dynamic_param_error
-                status = "error" if not skip_on_dynamic_param_errors or not dynamic_param_error else "skip"
+                if not expected_failure_occurred:
+                    if skip_on_dynamic_param_errors and dynamic_param_error:
+                        status = "skip"
+                    else:
+                        status = "error"
             if input_staging_exception:
                 job_data["execution_problem"] = f"Input staging problem: {util.unicodify(input_staging_exception)}"
                 status = "error"
