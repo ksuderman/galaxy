@@ -1,0 +1,67 @@
+name: Build and Push Container Image
+on:
+  push:
+    branches:
+      - 'krelease*'
+      - kdev
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: Build container image
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'ksuderman'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get short SHA for this commit
+        id: commit
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Set branch name
+        id: branch
+        run: echo "name=$(echo ${{ github.ref_name }}/krelease_/)" >> $GITHUB_OUTPUT
+
+      - name: Don't build and push release_* images if the image already exists
+        if: contains('refs/heads/krelease_', github.ref)
+        run: |
+          code=$(/usr/bin/curl -s -w "%{http_code}" -o /dev/null https://hub.docker.com/v2/repositories/ksuderman/galaxy-min/tags/${{ steps.branch.outputs.name }})
+          if [[ $code == 200 ]] ; then
+            echo "Release image exists. Skipping the Docker build.
+            exit 1
+          fi
+
+      # Log in to all repos we will push to.
+
+      - name: Login to DockerHub
+        uses: actions-hub/docker/login@master
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+#      - name: Login to quay.io
+#        uses: actions-hub/docker/login@master
+#        env:
+#          DOCKER_USERNAME: ${{ secrets.QUAY_USERNAME }}
+#          DOCKER_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+#          DOCKER_REGISTRY_URL: quay.io
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          push: true
+          dockerfile: .k8s_ci.Dockerfile
+          tags: |
+            ksuderman/galaxy-min:${{ steps.branch.outputs.name }}
+            ksuderman/galaxy-k8s-auto:${{ steps.commit.outputs.sha }}
+#            quay.io/galaxyproject/galaxy-min:${{ steps.branch.outputs.name }}
+#            quay.io/galaxyproject/galaxy-k8s-auto:${{ steps.commit.outputs.short_sha }}
+          labels:
+#            quay.io/galaxyproject/galaxy-k8s-auto:${{ steps.commit.outputs.short_sha }}=quay.expires-after=90d
+            ksuderman/galaxy-min:${{ steps.branch.outputs.name }}=production
+            ksuderman/galaxy-k8s-auto:${{ steps.commit.outputs.sha }}=quay.expires-after=90d
+          buildArgs: |
+            GIT_COMMIT=$(git rev-parse HEAD)
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            IMAGE_TAG=${{ steps.branch.outputs.name }}
+
