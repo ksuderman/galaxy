@@ -1,0 +1,44 @@
+name: Tag and push image
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag to push (eg, 22.05)'
+        required: true
+jobs:
+  release:
+    name: Retag image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Docker Hub
+        uses: actions-hub/docker/login@master
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to quay.io
+        uses: actions-hub/docker/login@master
+        env:
+          DOCKER_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+          DOCKER_REGISTRY_URL: quay.io
+
+      - name: Pull from Docker Hub
+        uses: actions-hub/docker@master
+        with:
+          args: pull galaxy/galaxy-anvil:${{ github.event.inputs.version }}-auto
+
+      - name: Tag image
+        run: |
+          docker tag galaxy/galaxy-anvil:${{ github.event.inputs.version }}-auto galaxy/galaxy-anvil:${{ github.event.inputs.version }} &&
+          docker tag galaxy/galaxy-anvil:${{ github.event.inputs.version }}-auto quay.io/galaxyproject/galaxy-anvil:${{ github.event.inputs.version }}
+
+      - name: Push to Docker Hub
+        uses: actions-hub/docker@master
+        with:
+          args: push galaxy/galaxy-anvil:${{ github.event.inputs.version }}
+
+      - name: Push to quay.io
+        uses: actions-hub/docker@master
+        with:
+          args: push quay.io/galaxyproject/galaxy-anvil:${{ github.event.inputs.version }}

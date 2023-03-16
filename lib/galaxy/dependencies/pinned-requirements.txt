@@ -198,3 +198,7 @@ yacman==0.8.4 ; python_version >= "3.7" and python_version < "3.12"
 yarl==1.8.2 ; python_version >= "3.7" and python_version < "3.12"
 zipp==3.11.0 ; python_version >= "3.7" and python_version < "3.10"
 zipstream-new==1.1.8 ; python_version >= "3.7" and python_version < "3.12"
+
+# anvil specific
+fs.anvilfs==0.2.3
+s3fs

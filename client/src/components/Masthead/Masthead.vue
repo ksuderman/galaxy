@@ -88,6 +88,21 @@ onMounted(() => {
     loadWebhookMenuItems(extensionTabs.value);
     setActiveTab();
 });
+
+// ANVIL SPECIFIC NAVIGATION GUARD
+
+const navGuardModal = ref(null);
+function showNavGuard(ev) {
+    const dismissNavGuard = localStorage.getItem("dismissNavGuard");
+    if (!dismissNavGuard === true) {
+        navGuardModal.value.show();
+        ev.preventDefault();
+    }
+}
+function confirmNav() {
+    localStorage.setItem("dismissNavGuard", true);
+    window.location = props.logoUrl;
+}
 </script>
 
 <template>
@@ -98,6 +113,7 @@ onMounted(() => {
                 class="ml-2 mr-1"
                 title="Home"
                 aria-label="homepage"
+                @click="showNavGuard"
                 :href="withPrefix(logoUrl)">
                 <img alt="logo" :src="withPrefix(logoSrc)" />
                 <img v-if="logoSrcSecondary" alt="logo" :src="withPrefix(logoSrcSecondary)" />
@@ -130,6 +146,19 @@ onMounted(() => {
             <masthead-item v-if="windowTab" :tab="windowTab" :toggle="windowToggle" @click="onWindowToggle" />
         </b-navbar-nav>
         <quota-meter />
+        <b-modal ref="navGuardModal" hide-footer title="A quick note before you go">
+            <div>
+                <p>
+                    You are navigating away from Galaxy, which will continue to run in the background. Any jobs you have
+                    running will continue, but it's important to keep in mind that this instance will also continue
+                    potentially incurring costs. Remember to shut down Galaxy when you are done.
+                </p>
+                <p>This modal will not be shown again.</p>
+            </div>
+            <b-button variant="primary" block @click="confirmNav">
+                I understand, take me back to my AnVIL Dashboard
+            </b-button>
+        </b-modal>
     </b-navbar>
 </template>
 
@@ -190,6 +219,7 @@ onMounted(() => {
             display: inline;
             border: none;
             height: 2.3rem;
+            padding: inherit; // ANVIL CUSTOM PADDING
         }
     }
     .navbar-text {
