@@ -11,6 +11,10 @@ jobs:
         id: branch
         run: echo "name=$(BRANCH_NAME=${GITHUB_REF##*/}; echo ${BRANCH_NAME/release_/}-auto)" >> $GITHUB_OUTPUT
 
+      - name: Get Galaxy version from branch name
+        id: version
+        run: echo "number=$(BRANCH_NAME=${GITHUB_REF##*/}; echo ${BRANCH_NAME/release_/})" >> $GITHUB_OUTPUT
+
       - name: Login to Docker Hub
         uses: actions-hub/docker/login@master
         env:
@@ -24,7 +28,7 @@ jobs:
           DOCKER_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
           DOCKER_REGISTRY_URL: quay.io
 
-      - run: docker build . -t galaxy/galaxy-anvil:${{ steps.branch.outputs.name }} -f .k8s_ci.Dockerfile
+      - run: docker build . --build-arg GIT_COMMIT=$(git rev-parse HEAD) --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') --build-arg IMAGE_TAG=${{ steps.version.outputs.number }} -t galaxy/galaxy-anvil:${{ steps.branch.outputs.name }} -f .k8s_ci.Dockerfile
 
       - name: Push to Docker Hub with branch name
         uses: actions-hub/docker@master
