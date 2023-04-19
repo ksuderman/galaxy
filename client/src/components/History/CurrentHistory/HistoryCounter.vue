@@ -6,6 +6,7 @@
             variant="link"
             size="sm"
             class="rounded-0 text-decoration-none"
+            :disabled="!showControls"
             @click="onDashboard">
             <icon icon="database" />
             <span>{{ historySize | niceFileSize }}</span>
@@ -28,7 +29,8 @@
                 variant="link"
                 size="sm"
                 class="rounded-0 text-decoration-none"
-                @click="setFilter('deleted:true')">
+                :pressed="filterText == 'deleted:true'"
+                @click="toggleDeleted()">
                 <icon icon="trash" />
                 <span>{{ numItemsDeleted }}</span>
             </b-button>
@@ -39,6 +41,7 @@
                 variant="link"
                 size="sm"
                 class="rounded-0 text-decoration-none"
+                :pressed="filterText == 'visible:false'"
                 @click="setFilter('visible:false')">
                 <icon icon="eye-slash" />
                 <span>{{ numItemsHidden }}</span>
@@ -72,6 +75,8 @@ export default {
         history: { type: Object, required: true },
         isWatching: { type: Boolean, default: false },
         lastChecked: { type: Date, default: null },
+        filterText: { type: String, default: "" },
+        showControls: { type: Boolean, default: false },
     },
     data() {
         return {
@@ -91,6 +96,20 @@ export default {
         },
         setFilter(newFilterText) {
             this.$emit("update:filter-text", newFilterText);
+        },
+        toggleDeleted() {
+            if (this.filterText === "deleted:true") {
+                this.setFilter("");
+            } else {
+                this.setFilter("deleted:true");
+            }
+        },
+        toggleHidden() {
+            if (this.filterText === "visible:false") {
+                this.setFilter("");
+            } else {
+                this.setFilter("visible:false");
+            }
         },
         updateTime() {
             const diffToNow = formatDistanceToNowStrict(this.lastChecked, { addSuffix: true, includeSeconds: true });
