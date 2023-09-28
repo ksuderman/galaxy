@@ -50,7 +50,7 @@ const columnStyle = computed(() => {
     const columnStyle = Array(props.options.dataset_config.metadata_columns);
     if (props.options.dataset_config.metadata_column_types?.length > 0) {
         props.options.dataset_config.metadata_column_types.forEach((column_type, index) => {
-            columnStyle[index] = column_type === "str" || column_type === "list" ? "stringalign" : "numberalign";
+            columnStyle[index] = column_type === "str" || column_type === "list" ? "string-align" : "number-align";
         });
     }
     return columnStyle;
@@ -88,7 +88,8 @@ function processChunk(chunk: TabularChunk) {
         parsedChunk = chunk.ck_data.trim().split("\n");
         parsedChunk = parsedChunk.map((line) => {
             try {
-                return parse(line, { delimiter: delimiter.value })[0];
+                const parsedLine = parse(line, { delimiter: delimiter.value })[0];
+                return parsedLine || [line];
             } catch (error) {
                 // Failing lines get passed through intact for row-level
                 // rendering/parsing.
@@ -116,17 +117,17 @@ function processRow(row: string[]) {
         return row.slice(0, num_columns - 1).concat([row.slice(num_columns - 1).join("\t")]);
     } else if (row.length === 1) {
         // Try to split by comma first
-        let rowDataSplit = row[0].split(",");
+        let rowDataSplit = row[0]!.split(",");
         if (rowDataSplit.length === num_columns) {
             return rowDataSplit;
         }
         // Try to split by tab
-        rowDataSplit = row[0].split("\t");
+        rowDataSplit = row[0]!.split("\t");
         if (rowDataSplit.length === num_columns) {
             return rowDataSplit;
         }
         // Try to split by space
-        rowDataSplit = row[0].split(" ");
+        rowDataSplit = row[0]!.split(" ");
         if (rowDataSplit.length === num_columns) {
             return rowDataSplit;
         }
@@ -180,8 +181,14 @@ onMounted(() => {
             </b-thead>
             <b-tbody>
                 <b-tr v-for="(row, index) in tabularData.rows" :key="index">
-                    <b-td v-for="(element, elementIndex) in row" :key="elementIndex" :class="columnStyle[elementIndex]">
+                    <b-td
+                        v-for="(element, elementIndex) in row.slice(0, -1)"
+                        :key="elementIndex"
+                        :class="columnStyle[elementIndex]">
                         {{ element }}
+                    </b-td>
+                    <b-td :class="columnStyle[row.length - 1]" :colspan="1 + columns.length - row.length">
+                        {{ row.slice(-1)[0] }}
                     </b-td>
                 </b-tr>
             </b-tbody>
@@ -190,10 +197,10 @@ onMounted(() => {
 </template>
 
 <style lang="scss" scoped>
-.stringalign {
+.string-align {
     text-align: left;
 }
-.numberalign {
+.number-align {
     text-align: right;
 }
 </style>

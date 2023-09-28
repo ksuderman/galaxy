@@ -1,5 +1,9 @@
-import { useConnectionStore } from "@/stores/workflowConnectionStore";
-import { Connection } from "@/stores/workflowConnectionStore";
+import {
+    getConnectionId,
+    useConnectionStore,
+    type Connection,
+    type ConnectionId,
+} from "@/stores/workflowConnectionStore";
 import EventEmitter from "events";
 import {
     NULL_COLLECTION_TYPE_DESCRIPTION,
@@ -18,6 +22,7 @@ import type {
     TerminalSource,
 } from "@/stores/workflowStepStore";
 import type { DatatypesMapperModel } from "@/components/Datatypes/model";
+import { assertDefined } from "@/utils/assertions";
 
 export class ConnectionAcceptable {
     reason: string | null;
@@ -76,23 +81,23 @@ class Terminal extends EventEmitter {
         return this.stepStore.stepMapOver[this.stepId] || NULL_COLLECTION_TYPE_DESCRIPTION;
     }
     connect(other: Terminal) {
-        const connection = new Connection(
-            { stepId: this.stepId, name: this.name, connectorType: "input" },
-            { stepId: other.stepId, name: other.name, connectorType: "output" }
-        );
+        const connection: Connection = {
+            input: { stepId: this.stepId, name: this.name, connectorType: "input" },
+            output: { stepId: other.stepId, name: other.name, connectorType: "output" },
+        };
         this.connectionStore.addConnection(connection);
     }
     disconnect(other: BaseOutputTerminal | Connection) {
         let connection: Connection;
         if (other instanceof Terminal) {
-            connection = new Connection(
-                { stepId: this.stepId, name: this.name, connectorType: "input" },
-                { stepId: other.stepId, name: other.name, connectorType: "output" }
-            );
+            connection = {
+                input: { stepId: this.stepId, name: this.name, connectorType: "input" },
+                output: { stepId: other.stepId, name: other.name, connectorType: "output" },
+            };
         } else {
             connection = other;
         }
-        this.connectionStore.removeConnection(connection.id);
+        this.connectionStore.removeConnection(getConnectionId(connection));
         this.resetMappingIfNeeded(connection);
     }
     setMapOver(val: CollectionTypeDescriptor) {
@@ -107,15 +112,20 @@ class Terminal extends EventEmitter {
             }
             outputVal = val.effectiveMapOver(description);
         }
+
         const effectiveMapOver = this._effectiveMapOver(outputVal);
+
         if (!this.localMapOver.equal(effectiveMapOver)) {
             this.stepStore.changeStepInputMapOver(this.stepId, this.name, effectiveMapOver);
             this.localMapOver = effectiveMapOver;
         }
+
         if (
             !this.mapOver.equal(effectiveMapOver) &&
             (effectiveMapOver.isCollection ||
-                !Object.values(this.stepStore.stepInputMapOver[this.stepId]).find((mapOver) => mapOver.isCollection))
+                !Object.values(this.stepStore.stepInputMapOver[this.stepId] ?? []).find(
+                    (mapOver) => mapOver.isCollection
+                ))
         ) {
             this.stepStore.changeStepMapOver(this.stepId, effectiveMapOver);
         }
@@ -175,8 +185,8 @@ class BaseInputTerminal extends Terminal {
         this.datatypes = attr.input.datatypes;
         this.multiple = attr.input.multiple;
         this.optional = attr.input.optional;
-        if (this.stepStore.stepInputMapOver[this.stepId] && this.stepStore.stepInputMapOver[this.stepId][this.name]) {
-            this.localMapOver = this.stepStore.stepInputMapOver[this.stepId][this.name];
+        if (this.stepStore.stepInputMapOver[this.stepId] && this.stepStore.stepInputMapOver[this.stepId]?.[this.name]) {
+            this.localMapOver = this.stepStore.stepInputMapOver[this.stepId]![this.name]!;
         } else {
             this.localMapOver = NULL_COLLECTION_TYPE_DESCRIPTION;
         }
@@ -212,7 +222,7 @@ class BaseInputTerminal extends Terminal {
     }
     attachable(terminal: BaseOutputTerminal): ConnectionAcceptable {
         // TODO: provide through Mixin
-        throw "Subclass needs to implement this";
+        throw Error("Subclass needs to implement this");
     }
     _getOutputStepsMapOver() {
         const connections = this._getOutputConnections();
@@ -228,16 +238,20 @@ class BaseInputTerminal extends Terminal {
         }
         Array.from(new Set(outputStepIds)).forEach((stepId) => {
             const step = this.stepStore.getStep(stepId);
-            // step must have an output, since it is or was connected to this step
-            const terminalSource = step.outputs[0];
-            if (terminalSource) {
-                const terminal = terminalFactory(step.id, terminalSource, this.datatypesMapper);
-                // drop mapping restrictions
-                terminal.resetMappingIfNeeded();
-                // re-establish map over through inputs
-                step.inputs.forEach((input) => {
-                    terminalFactory(step.id, input, this.datatypesMapper).getStepMapOver();
-                });
+            if (step) {
+                // step must have an output, since it is or was connected to this step
+                const terminalSource = step.outputs[0];
+                if (terminalSource) {
+                    const terminal = terminalFactory(step.id, terminalSource, this.datatypesMapper);
+                    // drop mapping restrictions
+                    terminal.resetMappingIfNeeded();
+                    // re-establish map over through inputs
+                    step.inputs.forEach((input) => {
+                        terminalFactory(step.id, input, this.datatypesMapper).getStepMapOver();
+                    });
+                }
+            } else {
+                console.error(`Invalid step. Could not fine step with id ${stepId} in store.`);
             }
         });
     }
@@ -277,9 +291,14 @@ class BaseInputTerminal extends Terminal {
     _collectionAttached() {
         const outputTerminals = this._getOutputTerminals();
         return outputTerminals.some((outputTerminal) => {
-            const output = this.stepStore
-                .getStep(outputTerminal.stepId)
-                .outputs.find((output) => output.name == outputTerminal.name);
+            const step = this.stepStore.getStep(outputTerminal.stepId);
+
+            if (!step) {
+                console.error(`Invalid step. Could not find step with id ${outputTerminal.stepId} in store.`);
+                return false;
+            }
+
+            const output = step.outputs.find((output) => output.name == outputTerminal.name);
 
             if (
                 output &&
@@ -354,11 +373,14 @@ class BaseInputTerminal extends Terminal {
                 outputStep.post_job_actions &&
                 postJobActionKey in outputStep.post_job_actions
             ) {
-                terminalSource = {
+                const extensionType = outputStep.post_job_actions![postJobActionKey]!.action_arguments.newtype;
+
+                (terminalSource as DataOutput | CollectionOutput) = {
                     ...terminalSource,
-                    extensions: [outputStep.post_job_actions[postJobActionKey].action_arguments.newtype],
+                    extensions: extensionType ? [extensionType] : [],
                 };
             }
+
             return terminalFactory(outputStep.id, terminalSource, this.datatypesMapper);
         });
     }
@@ -366,7 +388,7 @@ class BaseInputTerminal extends Terminal {
     getInvalidConnectedTerminals() {
         return this.getConnectedTerminals().filter((terminal) => {
             const canAccept = this.attachable(terminal);
-            const connectionId = `${this.stepId}-${this.name}-${terminal.stepId}-${terminal.name}`;
+            const connectionId: ConnectionId = `${this.stepId}-${this.name}-${terminal.stepId}-${terminal.name}`;
             if (!canAccept.canAccept) {
                 this.connectionStore.markInvalidConnection(connectionId, canAccept.reason ?? "Unknown");
                 return true;
@@ -530,9 +552,11 @@ export class InputCollectionTerminal extends BaseInputTerminal {
         const canMatch = collectionTypes.some((collectionType) => collectionType.canMatch(otherCollectionType));
         if (!canMatch) {
             for (const collectionTypeIndex in collectionTypes) {
-                const collectionType = collectionTypes[collectionTypeIndex];
+                const collectionType = collectionTypes[collectionTypeIndex]!;
+
                 if (otherCollectionType.canMapOver(collectionType)) {
                     const effectiveMapOver = otherCollectionType.effectiveMapOver(collectionType);
+
                     if (effectiveMapOver != NULL_COLLECTION_TYPE_DESCRIPTION) {
                         return effectiveMapOver;
                     }
@@ -614,6 +638,8 @@ class BaseOutputTerminal extends Terminal {
     getConnectedTerminals(): InputTerminalsAndInvalid[] {
         return this.connections.map((connection) => {
             const inputStep = this.stepStore.getStep(connection.input.stepId);
+            assertDefined(inputStep, `Invalid step. Could not find step with id ${connection.input.stepId} in store.`);
+
             const extraStepInput = this.stepStore.getStepExtraInputs(inputStep.id);
             const terminalSource = [...extraStepInput, ...inputStep.inputs].find(
                 (input) => input.name === connection.input.name
@@ -639,7 +665,7 @@ class BaseOutputTerminal extends Terminal {
     getInvalidConnectedTerminals() {
         return this.getConnectedTerminals().filter((terminal: any) => {
             const canAccept = terminal.attachable(this);
-            const connectionId = `${terminal.stepId}-${terminal.name}-${this.stepId}-${this.name}`;
+            const connectionId: ConnectionId = `${terminal.stepId}-${terminal.name}-${this.stepId}-${this.name}`;
             if (!canAccept.canAccept) {
                 this.connectionStore.markInvalidConnection(connectionId, canAccept.reason ?? "Unknown");
                 return true;
@@ -704,6 +730,8 @@ export class OutputCollectionTerminal extends BaseOutputTerminal {
         if (connection) {
             const outputStep = this.stepStore.getStep(connection.output.stepId);
             const inputStep = this.stepStore.getStep(this.stepId);
+            assertDefined(inputStep, `Invalid step. Could not find step with id ${connection.input.stepId} in store.`);
+
             if (outputStep) {
                 const stepOutput = outputStep.outputs.find((output) => output.name == connection.output.name);
                 const stepInput = inputStep.inputs.find((input) => input.name === this.collectionTypeSource);
@@ -780,17 +808,20 @@ export function producesAcceptableDatatype(
     otherDatatypes: string[]
 ) {
     for (const t in inputDatatypes) {
-        const thisDatatype = inputDatatypes[t];
-        if (thisDatatype == "input") {
+        const thisDatatype = inputDatatypes[t]!;
+
+        if (thisDatatype === "input") {
             return new ConnectionAcceptable(true, null);
         }
+
         // FIXME: No idea what to do about case when datatype is 'input'
         const validMatch = otherDatatypes.some(
             (otherDatatype) =>
-                otherDatatype == "input" ||
-                otherDatatype == "_sniff_" ||
+                otherDatatype === "input" ||
+                otherDatatype === "_sniff_" ||
                 datatypesMapper.isSubType(otherDatatype, thisDatatype)
         );
+
         if (validMatch) {
             return new ConnectionAcceptable(true, null);
         }
@@ -930,5 +961,5 @@ export function terminalFactory<T extends TerminalSourceAndInvalid>(
     if (isInvalidOutputArg(terminalSource)) {
         return new InvalidOutputTerminal(terminalSource) as TerminalOf<T>;
     }
-    throw `Could not build terminal for ${terminalSource}`;
+    throw Error(`Could not build terminal for ${terminalSource}`);
 }

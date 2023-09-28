@@ -69,6 +69,9 @@
                     border-bottom: dotted $brand-primary 1px;
                     margin: 0 5px;
                 }
+                .output-data-row {
+                    overflow-wrap: anywhere;
+                }
             }
         }
         .workflow-canvas {
@@ -82,47 +85,6 @@
                 left: 0px;
                 top: 0px;
                 overflow: hidden;
-            }
-            .canvas-background {
-                @extend .rounded;
-                background: $workflow-editor-bg;
-                background-size: $workflow-editor-grid-size $workflow-editor-grid-size;
-                background-image: linear-gradient(to right, $workflow-editor-grid-color 1px, transparent 1px),
-                    linear-gradient(to bottom, $workflow-editor-grid-color 1px, transparent 1px);
-                // Set width and height to 10 times larger than canvas, so that we can zoom out and still see the grid
-                width: 1000%;
-                height: 1000%;
-                // Set the initial position to the center of the canvas, again so that we can zoom out and still see the grid in the top left direction
-                top: -500%;
-                left: -500%;
-                transform-origin: center;
-                position: relative;
-            }
-            .ribbon {
-                .ribbon-outer {
-                    stroke: $brand-primary;
-                }
-                .ribbon-outer:active {
-                    stroke: $brand-success;
-                }
-                .ribbon-inner {
-                    stroke: $white;
-                }
-                .ribbon-inner:active {
-                    stroke: $brand-success;
-                }
-                .ribbon-inner-valid {
-                    stroke: $brand-success;
-                }
-                .ribbon-inner-invalid {
-                    stroke: $brand-warning;
-                }
-                &.dashed {
-                    stroke-dasharray: 5, 3;
-                }
-                &:hover .ribbon-outer {
-                    stroke: $brand-success;
-                }
             }
             .base-terminal {
                 @extend .fa;
@@ -278,14 +240,6 @@
             background: $white;
             opacity: 0.8;
             z-index: 10;
-        }
-        canvas {
-            position: absolute;
-            z-index: 10;
-        }
-        canvas.dragging {
-            position: absolute;
-            z-index: 1000;
         }
     }
 }

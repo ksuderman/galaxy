@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import DraggableWrapper from "./DraggablePan.vue";
-import { useCoordinatePosition, type ElementBounding } from "./composables/useCoordinatePosition";
 import { useTerminal } from "./composables/useTerminal";
-import { ref, computed, watch, nextTick, toRefs, onBeforeUnmount, type Ref } from "vue";
+import { ref, computed, watch, nextTick, toRefs, onBeforeUnmount, type Ref, type UnwrapRef } from "vue";
 import type { DatatypesMapperModel } from "@/components/Datatypes/model";
 import { useWorkflowStateStore, type XYPosition } from "@/stores/workflowEditorStateStore";
 import ConnectionMenu from "@/components/Workflow/Editor/ConnectionMenu.vue";
@@ -13,8 +12,18 @@ import {
     type PostJobActions,
     type PostJobAction,
 } from "@/stores/workflowStepStore";
-import type { UseScrollReturn } from "@vueuse/core";
+import { assertDefined, ensureDefined } from "@/utils/assertions";
+import type { UseElementBoundingReturn, UseScrollReturn } from "@vueuse/core";
+import { useRelativePosition } from "./composables/relativePosition";
 import { NULL_COLLECTION_TYPE_DESCRIPTION, type CollectionTypeDescriptor } from "./modules/collectionTypeDescription";
+import StatelessTags from "@/components/TagsMultiselect/StatelessTags.vue";
+import { faPlus, faMinus } from "@fortawesome/free-solid-svg-icons";
+import { library } from "@fortawesome/fontawesome-svg-core";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
+
+type ElementBounding = UnwrapRef<UseElementBoundingReturn>;
+
+library.add(faPlus, faMinus);
 
 const props = defineProps<{
     output: OutputTerminalSource;
@@ -22,19 +31,25 @@ const props = defineProps<{
     stepType: Step["type"];
     stepId: number;
     postJobActions: PostJobActions;
-    stepPosition: NonNullable<Step["position"]>;
-    rootOffset: Ref<ElementBounding>;
+    stepPosition: Step["position"];
+    rootOffset: ElementBounding;
     scroll: UseScrollReturn;
     scale: number;
     datatypesMapper: DatatypesMapperModel;
+    parentNode: HTMLElement | null;
 }>();
 
 const emit = defineEmits(["pan-by", "stopDragging", "onDragConnector"]);
 const stateStore = useWorkflowStateStore();
 const stepStore = useWorkflowStepStore();
-const el = ref(null);
-const { rootOffset, stepPosition, output, stepId, datatypesMapper } = toRefs(props);
-const position = useCoordinatePosition(el, rootOffset, stepPosition);
+const icon: Ref<HTMLElement | null> = ref(null);
+const { rootOffset, output, stepId, datatypesMapper } = toRefs(props);
+
+const position = useRelativePosition(
+    icon,
+    computed(() => props.parentNode)
+);
+
 const extensions = computed(() => {
     let changeDatatype: PostJobAction | undefined;
     if ("label" in props.output && props.postJobActions[`ChangeDatatypeAction${props.output.label}`]) {
@@ -87,7 +102,6 @@ const rowClass = computed(() => {
 });
 
 const menu: Ref<InstanceType<typeof ConnectionMenu> | undefined> = ref();
-const icon: Ref<HTMLElement | undefined> = ref();
 const showChildComponent = ref(false);
 
 function closeMenu() {
@@ -108,6 +122,7 @@ async function toggleChildComponent() {
 
 function onToggleActive() {
     const step = stepStore.getStep(stepId.value);
+    assertDefined(step);
     let stepWorkflowOutputs = [...(step.workflow_outputs || [])];
     if (workflowOutput.value) {
         stepWorkflowOutputs = stepWorkflowOutputs.filter(
@@ -121,7 +136,7 @@ function onToggleActive() {
 
 function onToggleVisible() {
     const actionKey = `HideDatasetAction${props.output.name}`;
-    const step = { ...stepStore.getStep(stepId.value) };
+    const step = { ...ensureDefined(stepStore.getStep(stepId.value)) };
     if (isVisible.value) {
         step.post_job_actions = {
             ...step.post_job_actions,
@@ -133,7 +148,7 @@ function onToggleVisible() {
         };
     } else {
         if (step.post_job_actions) {
-            const { [actionKey]: ignoreUnused, ...newPostJobActions } = step.post_job_actions;
+            const { [actionKey]: _unused, ...newPostJobActions } = step.post_job_actions;
             step.post_job_actions = newPostJobActions;
         } else {
             step.post_job_actions = {};
@@ -157,8 +172,12 @@ const dragX = ref(0);
 const dragY = ref(0);
 const isDragging = ref(false);
 
-const startX = computed(() => position.left + props.scroll.x.value / props.scale + position.width / 2);
-const startY = computed(() => position.top + props.scroll.y.value / props.scale + position.height / 2);
+const startX = computed(
+    () => position.value.offsetLeft + (props.stepPosition?.left ?? 0) + (icon.value?.offsetWidth ?? 2) / 2
+);
+const startY = computed(
+    () => position.value.offsetTop + (props.stepPosition?.top ?? 0) + (icon.value?.offsetHeight ?? 2) / 2
+);
 const endX = computed(() => {
     return (dragX.value || startX.value) + props.scroll.x.value / props.scale;
 });
@@ -173,9 +192,6 @@ const dragPosition = computed(() => {
         endY: endY.value,
     };
 });
-const terminalPosition = computed(() => {
-    return Object.freeze({ startX: startX.value, startY: startY.value });
-});
 
 watch([dragPosition, isDragging], () => {
     if (isDragging.value) {
@@ -183,13 +199,19 @@ watch([dragPosition, isDragging], () => {
     }
 });
 
-watch(terminalPosition, () =>
-    stateStore.setOutputTerminalPosition(props.stepId, props.output.name, terminalPosition.value)
+watch(
+    [startX, startY],
+    ([x, y]) => {
+        stateStore.setOutputTerminalPosition(props.stepId, props.output.name, { startX: x, startY: y });
+    },
+    {
+        immediate: true,
+    }
 );
 
 function onMove(dragPosition: XYPosition) {
-    dragX.value = dragPosition.x + position.width / 2;
-    dragY.value = dragPosition.y + position.height / 2;
+    dragX.value = dragPosition.x + icon.value!.clientWidth / 2;
+    dragY.value = dragPosition.y + icon.value!.clientHeight / 2;
 }
 
 const id = computed(() => `node-${props.stepId}-output-${props.output.name}`);
@@ -250,28 +272,60 @@ const outputDetails = computed(() => {
 onBeforeUnmount(() => {
     stateStore.deleteOutputTerminalPosition(props.stepId, props.output.name);
 });
+
+const addTagsAction = computed(() => {
+    return props.postJobActions[`TagDatasetAction${props.output.name}`]?.action_arguments?.tags?.split(",") ?? [];
+});
+
+const removeTagsAction = computed(() => {
+    return props.postJobActions[`RemoveTagDatasetAction${props.output.name}`]?.action_arguments?.tags?.split(",") ?? [];
+});
 </script>
+
 <template>
-    <div :class="rowClass" :data-output-name="output.name">
-        <div
-            v-if="showCalloutActiveOutput"
-            v-b-tooltip
-            class="callout-terminal"
-            title="Checked outputs will become primary workflow outputs and are available as subworkflow outputs."
-            @keyup="onToggleActive"
-            @click="onToggleActive">
-            <i :class="['mark-terminal', activeClass]" />
+    <div class="d-flex" :class="rowClass" :data-output-name="output.name">
+        <div class="d-flex flex-column w-100">
+            <div class="d-flex flex-row">
+                <div
+                    v-if="showCalloutActiveOutput"
+                    v-b-tooltip
+                    class="callout-terminal"
+                    title="Checked outputs will become primary workflow outputs and are available as subworkflow outputs."
+                    @keyup="onToggleActive"
+                    @click="onToggleActive">
+                    <i :class="['mark-terminal', activeClass]" />
+                </div>
+                <div
+                    v-if="showCalloutVisible"
+                    v-b-tooltip
+                    class="callout-terminal"
+                    :title="visibleHint"
+                    @keyup="onToggleVisible"
+                    @click="onToggleVisible">
+                    <i :class="['mark-terminal', visibleClass]" />
+                </div>
+                {{ label }}
+            </div>
+
+            <div
+                v-if="addTagsAction.length > 0"
+                v-b-tooltip.left
+                class="d-flex align-items-center overflow-x-hidden"
+                title="These tags will be added to the output dataset">
+                <FontAwesomeIcon icon="fa-plus" class="mr-1" />
+                <StatelessTags disabled no-padding :value="addTagsAction" />
+            </div>
+
+            <div
+                v-if="removeTagsAction.length > 0"
+                v-b-tooltip.left
+                class="d-flex align-items-center overflow-x-hidden"
+                title="These tags will be removed from the output dataset">
+                <FontAwesomeIcon icon="fa-minus" class="mr-1" />
+                <StatelessTags disabled no-padding :value="removeTagsAction" />
+            </div>
         </div>
-        <div
-            v-if="showCalloutVisible"
-            v-b-tooltip
-            class="callout-terminal"
-            :title="visibleHint"
-            @keyup="onToggleVisible"
-            @click="onToggleVisible">
-            <i :class="['mark-terminal', visibleClass]" />
-        </div>
-        {{ label }}
+
         <draggable-wrapper
             :id="id"
             ref="el"

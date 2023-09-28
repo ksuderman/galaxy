@@ -10,6 +10,15 @@ import { terminalFactory } from "./modules/terminals";
 
 const localVue = getLocalVue();
 
+class ResizeObserver {
+    observe = jest.fn();
+    unobserve = jest.fn();
+    disconnect = jest.fn();
+}
+
+// eslint-disable-next-line compat/compat
+window.ResizeObserver = ResizeObserver;
+
 function propsForStep(step: Step) {
     return {
         output: step.outputs[0],
@@ -29,7 +38,7 @@ function propsForStep(step: Step) {
 function stepForLabel(label: string, steps: Steps) {
     const step = Object.values(steps).find((step) => step.label === label);
     if (!step) {
-        throw "step not found for test";
+        throw Error("step not found for test");
     }
     return step;
 }
@@ -61,8 +70,8 @@ describe("NodeOutput", () => {
     it("displays multiple icon if not mapped over", async () => {
         const simpleDataStep = stepForLabel("simple data", stepStore.steps);
         const listInputStep = stepForLabel("list input", stepStore.steps);
-        const inputTerminal = terminalFactory(simpleDataStep.id, simpleDataStep.inputs[0], testDatatypesMapper);
-        const outputTerminal = terminalFactory(listInputStep.id, listInputStep.outputs[0], testDatatypesMapper);
+        const inputTerminal = terminalFactory(simpleDataStep.id, simpleDataStep.inputs[0]!, testDatatypesMapper);
+        const outputTerminal = terminalFactory(listInputStep.id, listInputStep.outputs[0]!, testDatatypesMapper);
         const propsData = propsForStep(simpleDataStep);
         const wrapper = shallowMount(NodeOutput, {
             propsData: propsData,

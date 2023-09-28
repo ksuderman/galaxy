@@ -1,6 +1,16 @@
 export const defaultNewFileName = "New File";
 
-const URI_PREFIXES = ["http", "https", "ftp", "file", "gxfiles", "gximport", "gxuserimport", "gxftp"];
+const URI_PREFIXES = [
+    "http://",
+    "https://",
+    "ftp://",
+    "file://",
+    "gxfiles://",
+    "gximport://",
+    "gxuserimport://",
+    "gxftp://",
+    "drs://",
+];
 function itemIsUrl(item) {
     return URI_PREFIXES.some((prefix) => item.get("url_paste").startsWith(prefix));
 }

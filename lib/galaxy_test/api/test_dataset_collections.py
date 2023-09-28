@@ -4,6 +4,7 @@ from typing import List
 
 from galaxy.util.unittest_utils import skip_if_github_down
 from galaxy_test.base.api_asserts import assert_object_id_error
+from galaxy_test.base.decorators import requires_new_user
 from galaxy_test.base.populators import (
     DatasetCollectionPopulator,
     DatasetPopulator,
@@ -181,9 +182,10 @@ class TestDatasetCollectionsApi(ApiTestCase):
             namelist = archive.namelist()
             assert len(namelist) == 3, f"Expected 3 elements in [{namelist}]"
 
+    @requires_new_user
     def test_hda_security(self):
         with self.dataset_populator.test_history(require_new=False) as history_id:
-            element_identifiers = self.dataset_collection_populator.pair_identifiers(history_id)
+            element_identifiers = self.dataset_collection_populator.pair_identifiers(history_id, wait=True)
             self.dataset_populator.make_private(history_id, element_identifiers[0]["id"])
             with self._different_user():
                 history_id = self.dataset_populator.new_history()
@@ -195,6 +197,40 @@ class TestDatasetCollectionsApi(ApiTestCase):
                 )
                 create_response = self._post("dataset_collections", payload, json=True)
                 self._assert_status_code_is(create_response, 403)
+
+    def test_dataset_collection_element_security(self):
+        with self.dataset_populator.test_history(require_new=False) as history_id:
+            dataset_collection = self.dataset_collection_populator.create_list_of_list_in_history(
+                history_id,
+                collection_type="list:list:list",
+                wait=True,
+            ).json()
+            first_element = dataset_collection["elements"][0]
+            assert first_element["model_class"] == "DatasetCollectionElement"
+            assert first_element["element_type"] == "dataset_collection"
+            first_element_url = f"/api/dataset_collection_element/{first_element['id']}"
+            # Make one dataset private to check that access permissions are respected
+            first_dataset_element = first_element["object"]["elements"][0]["object"]["elements"][0]
+            self.dataset_populator.make_private(history_id, first_dataset_element["object"]["id"])
+            with self._different_user():
+                assert self._get(first_element_url).status_code == 403
+            collection_dce_response = self._get(first_element_url)
+            collection_dce_response.raise_for_status()
+            collection_dce = collection_dce_response.json()
+            assert collection_dce["model_class"] == "DatasetCollectionElement"
+            assert collection_dce["element_type"] == "dataset_collection"
+            first_dataset_element = first_element["object"]["elements"][0]["object"]["elements"][0]
+            assert first_dataset_element["model_class"] == "DatasetCollectionElement"
+            assert first_dataset_element["element_type"] == "hda"
+            first_dataset_element_url = f"/api/dataset_collection_element/{first_dataset_element['id']}"
+            with self._different_user():
+                assert self._get(first_dataset_element_url).status_code == 403
+            dataset_dce_response = self._get(first_dataset_element_url)
+            dataset_dce_response.raise_for_status()
+            dataset_dce = dataset_dce_response.json()
+            assert dataset_dce["model_class"] == "DatasetCollectionElement"
+            assert dataset_dce["element_type"] == "hda"
+            assert dataset_dce["object"]["model_class"] == "HistoryDatasetAssociation"
 
     def test_enforces_unique_names(self):
         with self.dataset_populator.test_history(require_new=False) as history_id:
@@ -374,6 +410,7 @@ class TestDatasetCollectionsApi(ApiTestCase):
     def _download_dataset_collection(self, history_id: str, hdca_id: str):
         return self._get(f"histories/{history_id}/contents/dataset_collections/{hdca_id}/download")
 
+    @requires_new_user
     def test_collection_contents_security(self, history_id):
         # request contents on an hdca that doesn't belong to user
         hdca, contents_url = self._create_collection_contents_pair(history_id)

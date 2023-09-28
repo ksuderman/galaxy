@@ -53,7 +53,10 @@ class StepOrderIndexGetter(GetterDict):
         if key == "workflow_step_id":
             return self._obj.workflow_step.order_index
         elif key == "dependent_workflow_step_id":
-            return self._obj.dependent_workflow_step.order_index
+            if self._obj.dependent_workflow_step_id:
+                return self._obj.dependent_workflow_step.order_index
+            else:
+                return default
 
         return super().get(key, default)
 
@@ -95,7 +98,7 @@ class GenericInvocationFailureDatasetFailed(InvocationFailureMessageBase[Databas
 class GenericInvocationFailureCollectionFailed(InvocationFailureMessageBase[DatabaseIdT], Generic[DatabaseIdT]):
     reason: Literal[FailureReason.collection_failed]
     hdca_id: DatabaseIdT = Field(
-        None,
+        ...,
         title="HistoryDatasetCollectionAssociation ID",
         description="HistoryDatasetCollectionAssociation ID that relates to failure.",
     )
@@ -104,7 +107,7 @@ class GenericInvocationFailureCollectionFailed(InvocationFailureMessageBase[Data
 
 class GenericInvocationFailureJobFailed(InvocationFailureMessageBase[DatabaseIdT], Generic[DatabaseIdT]):
     reason: Literal[FailureReason.job_failed]
-    job_id: DatabaseIdT = Field(None, title="Job ID", description="Job ID that relates to failure.")
+    job_id: DatabaseIdT = Field(..., title="Job ID", description="Job ID that relates to failure.")
     dependent_workflow_step_id: int = Field(..., description="Workflow step id of step that caused failure.")
 
 

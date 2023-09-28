@@ -51,6 +51,7 @@ from galaxy.managers.base import decode_id
 from galaxy.managers.context import ProvidesUserContext
 from galaxy.managers.executables import artifact_class
 from galaxy.model import StoredWorkflow
+from galaxy.model.base import transaction
 from galaxy.model.index_filter_util import (
     append_user_filter,
     raw_text_column_filter,
@@ -199,6 +200,8 @@ class WorkflowsManager(sharable.SharableModelManager, deletable.DeletableManager
                     elif key == "is":
                         if q == "published":
                             query = query.filter(model.StoredWorkflow.published == true())
+                        elif q == "importable":
+                            query = query.filter(model.StoredWorkflow.importable == true())
                         elif q == "deleted":
                             query = query.filter(model.StoredWorkflow.deleted == true())
                             show_deleted = true
@@ -313,7 +316,8 @@ class WorkflowsManager(sharable.SharableModelManager, deletable.DeletableManager
                 user=trans.user, name=workflow.name, workflow=workflow, hidden=True
             )
             trans.sa_session.add(stored_workflow)
-            trans.sa_session.flush()
+            with transaction(trans.sa_session):
+                trans.sa_session.commit()
             return stored_workflow
 
     def get_owned_workflow(self, trans, encoded_workflow_id):
@@ -407,7 +411,8 @@ class WorkflowsManager(sharable.SharableModelManager, deletable.DeletableManager
         if cancelled:
             workflow_invocation.add_message(InvocationCancellationUserRequest(reason="user_request"))
             trans.sa_session.add(workflow_invocation)
-            trans.sa_session.flush()
+            with transaction(trans.sa_session):
+                trans.sa_session.commit()
         else:
             # TODO: More specific exception?
             raise exceptions.MessageException("Cannot cancel an inactive workflow invocation.")
@@ -444,7 +449,8 @@ class WorkflowsManager(sharable.SharableModelManager, deletable.DeletableManager
         performed_action = module.do_invocation_step_action(step, action)
         workflow_invocation_step.action = performed_action
         trans.sa_session.add(workflow_invocation_step)
-        trans.sa_session.flush()
+        with transaction(trans.sa_session):
+            trans.sa_session.commit()
         return workflow_invocation_step
 
     def build_invocations_query(
@@ -633,7 +639,7 @@ class WorkflowContentsManager(UsesAnnotations):
             annotation = sanitize_html(data["annotation"])
             self.add_item_annotation(trans.sa_session, stored.user, stored, annotation)
         workflow_tags = data.get("tags", [])
-        trans.app.tag_handler.set_tags_from_list(user=trans.user, item=stored, new_tags_list=workflow_tags)
+        trans.tag_handler.set_tags_from_list(user=trans.user, item=stored, new_tags_list=workflow_tags)
 
         # Persist
         trans.sa_session.add(stored)
@@ -645,7 +651,8 @@ class WorkflowContentsManager(UsesAnnotations):
             menuEntry.stored_workflow = stored
             trans.user.stored_workflow_menu_entries.append(menuEntry)
 
-        trans.sa_session.flush()
+        with transaction(trans.sa_session):
+            trans.sa_session.commit()
 
         return CreatedWorkflow(stored_workflow=stored, workflow=workflow, missing_tools=missing_tool_tups)
 
@@ -693,7 +700,8 @@ class WorkflowContentsManager(UsesAnnotations):
 
         # Persist
         if not dry_run:
-            trans.sa_session.flush()
+            with transaction(trans.sa_session):
+                trans.sa_session.commit()
             if stored_workflow.from_path:
                 self._sync_stored_workflow(trans, stored_workflow)
         # Return something informative
@@ -940,7 +948,7 @@ class WorkflowContentsManager(UsesAnnotations):
                 inputs = step.module.get_runtime_inputs(connections=step.output_connections)
                 step_model = {"inputs": [input.to_dict(trans) for input in inputs.values()]}
             step_model["when"] = step.when_expression
-            step_model["replacement_parameters"] = step.module.get_replacement_parameters(step)
+            step_model["replacement_parameters"] = step.module.get_informal_replacement_parameters(step)
             step_model["step_type"] = step.type
             step_model["step_label"] = step.label
             step_model["step_name"] = step.module.get_name()

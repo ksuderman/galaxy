@@ -18,6 +18,7 @@ from galaxy.model import (
     WorkflowInvocation,
     WorkflowInvocationStep,
 )
+from galaxy.model.base import transaction
 from galaxy.schema.invocation import (
     CancelReason,
     FailureReason,
@@ -111,7 +112,8 @@ def __invoke(
 
     # Be sure to update state of workflow_invocation.
     trans.sa_session.add(workflow_invocation)
-    trans.sa_session.flush()
+    with transaction(trans.sa_session):
+        trans.sa_session.commit()
 
     return outputs, workflow_invocation
 
@@ -351,6 +353,7 @@ class WorkflowProgress:
         self.copy_inputs_to_history = copy_inputs_to_history
         self.use_cached_job = use_cached_job
         self.replacement_dict = replacement_dict or {}
+        self.runtime_replacements: Dict[str, str] = {}
         self.subworkflow_collection_info = subworkflow_collection_info
         self.subworkflow_structure = subworkflow_collection_info.structure if subworkflow_collection_info else None
         self.when_values = when_values
@@ -545,7 +548,18 @@ class WorkflowProgress:
             elif step_id in self.inputs_by_step_id:
                 outputs["output"] = self.inputs_by_step_id[step_id]
 
+        if step.label and step.type == "parameter_input" and "output" in outputs:
+            self.runtime_replacements[step.label] = str(outputs["output"])
         self.set_step_outputs(invocation_step, outputs, already_persisted=already_persisted)
+
+    def effective_replacement_dict(self):
+        replacement_dict = {}
+        for key, value in self.replacement_dict.items():
+            replacement_dict[key] = value
+        for key, value in self.runtime_replacements.items():
+            if key not in replacement_dict:
+                replacement_dict[key] = value
+        return replacement_dict
 
     def set_step_outputs(
         self, invocation_step: WorkflowInvocationStep, outputs: Dict[str, Any], already_persisted: bool = False

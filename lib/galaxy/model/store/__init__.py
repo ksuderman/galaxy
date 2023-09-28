@@ -55,6 +55,7 @@ from galaxy.files import (
     ProvidesUserFileSourcesUserContext,
 )
 from galaxy.files.uris import stream_url_to_file
+from galaxy.model.base import transaction
 from galaxy.model.mapping import GalaxyModelMapping
 from galaxy.model.metadata import MetadataCollection
 from galaxy.model.orm.util import (
@@ -197,6 +198,9 @@ class ImportOptions:
 class SessionlessContext:
     def __init__(self) -> None:
         self.objects: Dict[Type, Dict] = defaultdict(dict)
+
+    def commit(self) -> None:
+        pass
 
     def flush(self) -> None:
         pass
@@ -650,6 +654,8 @@ class ModelImportStore(metaclass=abc.ABCMeta):
                                         file_name=source,
                                         create=True,
                                     )
+                        # Don't trust serialized file size
+                        dataset_instance.dataset.file_size = None
                         dataset_instance.dataset.set_total_size()  # update the filesize record in the database
 
                     if dataset_instance.deleted:
@@ -754,7 +760,8 @@ class ModelImportStore(metaclass=abc.ABCMeta):
                     ld.library_dataset_dataset_association = ldda
                 self._session_add(ld)
 
-            self.sa_session.flush()
+            with transaction(self.sa_session):
+                self.sa_session.commit()
             return library_folder
 
         libraries_attrs = self.library_properties()
@@ -1266,7 +1273,8 @@ class ModelImportStore(metaclass=abc.ABCMeta):
         self.sa_session.add(obj)
 
     def _flush(self) -> None:
-        self.sa_session.flush()
+        with transaction(self.sa_session):
+            self.sa_session.commit()
 
 
 def _copied_from_object_key(
@@ -2128,12 +2136,14 @@ class DirectoryModelExportStore(ModelExportStore):
         datasets = query.all()
         for dataset in datasets:
             dataset.annotation = get_item_annotation_str(sa_session, history.user, dataset)
-            add_dataset = (dataset.visible or include_hidden) and (not dataset.deleted or include_deleted)
-            if dataset.id in self.collection_datasets:
-                add_dataset = True
+            should_include_file = (dataset.visible or include_hidden) and (not dataset.deleted or include_deleted)
+            if not dataset.deleted and dataset.id in self.collection_datasets:
+                should_include_file = True
 
             if dataset not in self.included_datasets:
-                self.add_dataset(dataset, include_files=add_dataset)
+                if should_include_file:
+                    self._ensure_dataset_file_exists(dataset)
+                self.add_dataset(dataset, include_files=should_include_file)
 
     def export_library(
         self, library: model.Library, include_hidden: bool = False, include_deleted: bool = False
@@ -2153,8 +2163,8 @@ class DirectoryModelExportStore(ModelExportStore):
     ) -> None:
         for library_dataset in library_folder.datasets:
             ldda = library_dataset.library_dataset_dataset_association
-            add_dataset = (not ldda.visible or not include_hidden) and (not ldda.deleted or include_deleted)
-            self.add_dataset(ldda, add_dataset)
+            should_include_file = (not ldda.visible or not include_hidden) and (not ldda.deleted or include_deleted)
+            self.add_dataset(ldda, should_include_file)
         for folder in library_folder.folders:
             self.export_library_folder_contents(folder, include_hidden=include_hidden, include_deleted=include_deleted)
 
@@ -2214,6 +2224,16 @@ class DirectoryModelExportStore(ModelExportStore):
 
     def add_dataset(self, dataset: model.DatasetInstance, include_files: bool = True) -> None:
         self.included_datasets[dataset] = (dataset, include_files)
+
+    def _ensure_dataset_file_exists(self, dataset: model.DatasetInstance) -> None:
+        state = dataset.dataset.state
+        if state in [model.Dataset.states.OK] and not dataset.file_name:
+            log.error(
+                f"Dataset [{dataset.id}] does not exists on on object store [{dataset.dataset.object_store_id or 'None'}], while trying to export."
+            )
+            raise Exception(
+                f"Cannot export history dataset [{getattr(dataset, 'hid', '')}: {dataset.name}] with id {self.exported_key(dataset)}"
+            )
 
     def _finalize(self) -> None:
         export_directory = self.export_directory
@@ -2436,7 +2456,7 @@ class WriteCrates:
                     "encodingFormat": encoding_format,
                 }
                 ro_crate.add_file(
-                    file_name,
+                    os.path.join(self.export_directory, file_name),
                     dest_path=file_name,
                     properties=properties,
                 )
@@ -2916,7 +2936,7 @@ def source_to_import_store(
     else:
         source_uri: str = str(source)
         delete = False
-        tag_handler = app.tag_handler.create_tag_handler_session()
+        tag_handler = app.tag_handler.create_tag_handler_session(galaxy_session=None)
         if source_uri.startswith("file://"):
             source_uri = source_uri[len("file://") :]
         if "://" in source_uri:
@@ -2957,7 +2977,6 @@ def source_to_import_store(
                     target_path, import_options=import_options, app=app, user=galaxy_user
                 )
             else:
-                # TODO: rocrate.zip is not supported here...
                 raise Exception(f"Unknown model_store_format type encountered {model_store_format}")
 
     return model_import_store
