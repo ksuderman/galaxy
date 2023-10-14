@@ -698,6 +698,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
         return new_params
 
     def check_watched_item(self, job_state):
+        log.debug("check wathced")
         """Checks the state of a job already submitted on k8s. Job state is an AsynchronousJobState"""
         jobs = find_job_object_by_name(self._pykube_api, job_state.job_id, self.runner_params["k8s_namespace"])
 
@@ -782,6 +783,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
             return None
 
     def _handle_unschedulable_job(self, job, job_state):
+        log.debug(f"handle unschedulable job")
         # Handle unschedulable job that exceeded deadline
         job_state.fail_message = "Job was unschedulable longer than specified deadline"
         job_state.runner_state = JobState.runner_states.WALLTIME_REACHED
@@ -796,6 +798,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
         return None
 
     def _handle_job_failure(self, job, job_state):
+        log.debug("handle job failure")
         # Figure out why job has failed
         with open(job_state.error_file, "a") as error_file:
             if self.__job_failed_due_to_low_memory(job_state):
@@ -820,6 +823,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
         return None
 
     def __cleanup_k8s_job(self, job):
+        log.debug("Cleaning up job")
         k8s_cleanup_job = self.runner_params["k8s_cleanup_job"]
         delete_job(job, k8s_cleanup_job)
 
@@ -895,6 +899,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
             self.__cleanup_k8s_service(k8s_service, job_failed)
 
     def stop_job(self, job_wrapper):
+        log.debug("Stop_job")
         """Attempts to delete a dispatched job to the k8s cluster"""
         job = job_wrapper.get_job()
         try:
@@ -919,6 +924,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
 
     def recover(self, job, job_wrapper):
         """Recovers jobs stuck in the queued/running state when Galaxy started"""
+        log.debug("recover")
         job_id = job.get_job_runner_external_id()
         log.debug(f"k8s trying to recover job: {job_id}")
         if job_id is None:
@@ -951,6 +957,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
             self.monitor_queue.put(ajs)
 
     def finish_job(self, job_state):
+        log.debug("finish job")
         self._handle_metadata_externally(job_state.job_wrapper, resolve_requirements=True)
         super().finish_job(job_state)
         jobs = find_job_object_by_name(self._pykube_api, job_state.job_id, self.runner_params["k8s_namespace"])
