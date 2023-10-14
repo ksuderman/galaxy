@@ -21,6 +21,7 @@ ARG SERVER_DIR=$ROOT_DIR/server
 ARG STAGE1_BASE=python:3.10-slim
 ARG FINAL_STAGE_BASE=$STAGE1_BASE
 ARG GALAXY_USER=galaxy
+ARG GALAXY_UID=101
 ARG GALAXY_PLAYBOOK_REPO=https://github.com/galaxyproject/galaxy-docker-k8s
 ARG GALAXY_PLAYBOOK_BRANCH=v4.0.0
 
@@ -166,7 +167,7 @@ RUN set -xe; \
 
 # Create Galaxy user, group, directory; chown
 RUN set -xe; \
-      adduser --system --group $GALAXY_USER \
+      adduser --system --group --uid $GALAXY_UID $GALAXY_USER \
       && mkdir -p $SERVER_DIR \
       && chown $GALAXY_USER:$GALAXY_USER $ROOT_DIR -R
 
@@ -179,7 +180,8 @@ COPY --chown=$GALAXY_USER:$GALAXY_USER --from=client_build $SERVER_DIR/static ./
 WORKDIR $SERVER_DIR
 
 # The data in version.json will be displayed in Galaxy's /api/version endpoint
-RUN printf "{\n  \"git_commit\": \"$(cat GITREVISION)\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json
+RUN printf "{\n  \"git_commit\": \"$(cat GITREVISION)\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
+    && chown $GALAXY_USER:$GALAXY_USER version.json \
 
 EXPOSE 8080
 USER $GALAXY_USER
