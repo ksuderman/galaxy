@@ -182,7 +182,7 @@ WORKDIR $SERVER_DIR
 
 # The data in version.json will be displayed in Galaxy's /api/version endpoint
 RUN printf "{\n  \"git_commit\": \"$(cat GITREVISION)\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
-    && chown $GALAXY_USER:$GALAXY_USER version.json \
+    && chown $GALAXY_USER:$GALAXY_USER version.json
 
 EXPOSE 8080
 USER $GALAXY_USER
