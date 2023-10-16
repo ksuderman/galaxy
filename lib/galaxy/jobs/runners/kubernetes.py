@@ -119,6 +119,8 @@ class KubernetesJobRunner(AsynchronousJobRunner):
         self._default_pull_policy = self.__get_pull_policy()
 
         self.setup_base_volumes()
+        log.debug("Kubernetes job runner %s is ready", KubernetesJobRunner.runner_name)
+        log.info("Kubernetes job runner %s is ready", KubernetesJobRunner.runner_name)
 
     def setup_base_volumes(self):
         def generate_volumes(pvc_list):
