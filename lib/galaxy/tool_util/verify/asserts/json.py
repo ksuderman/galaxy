@@ -1,4 +1,5 @@
 import json
+import subprocess
 from typing import (
     Any,
     Callable,
@@ -58,3 +59,15 @@ def assert_json_and_load(json_str: str):
         return json.loads(json_str)
     except Exception:
         raise AssertionError(f"Failed to parse JSON from {json_str[0:1024]}.")
+
+
+def assert_json_query(
+    json_str,
+    query: str,
+    expected: str,
+):
+    # We don't need the json loaded, but it is useful to ensure it is valid.
+    assert_json_and_load(json_str)
+    p = subprocess.run(['jq', query], input=json_str, check=True, text=True, capture_output=True, shell=False)
+    actual = p.stdout.strip()
+    assert actual == expected, f"Expected jq expression [{query}] to return [{expected}], but got [{actual}]."

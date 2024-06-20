@@ -1,0 +1,23 @@
+<tool id="echo_text" name="Write text to a file" version="1.0.0" python_template_version="3.5" profile="21.05">
+    <version_command><![CDATA[
+echo "1.0.0"
+    ]]></version_command>
+    <command detect_errors="exit_code"><![CDATA[
+    	echo "${input}" > $outputFile
+    ]]></command>
+    <inputs>
+	    <param name="input" type="text" label="Text"/>
+    </inputs>
+    <outputs>
+    	<data name="outputFile" format="txt"/>
+    </outputs>
+    <tests>
+    	<test>
+    		<param name="input" value="This is a test."/>
+    		<output name="outputFile" file="test1.txt"/>
+    	</test>
+    </tests>
+    <help><![CDATA[
+Just write some text to a dataset...
+    ]]></help>
+</tool>
