@@ -1,6 +1,4 @@
-"""
-Base classes for job runner plugins.
-"""
+
 
 import datetime
 import os
@@ -110,6 +108,7 @@ class BaseJobRunner:
         if kwargs:
             log.debug("Loading %s with params: %s", self.runner_name, kwargs)
         self.runner_params = RunnerParams(specs=runner_param_specs, params=kwargs)
+        log.debug("Loading %s with params: %s", self.runner_name, self.runner_params)
         self.runner_state_handlers = build_state_handlers()
         self._should_stop = False
 

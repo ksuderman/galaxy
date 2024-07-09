@@ -435,6 +435,59 @@ class KubernetesJobRunner(AsynchronousJobRunner):
         }
         return k8s_spec_template
 
+    def __get_k8s_ingress_rules_spec(self, ajs, entry_points):
+        """This represents the template for the "rules" portion of the Ingress spec."""
+        log.debug("Getting k8s ingress rules spec for job %s", ajs.job_wrapper.get_id_tag())
+        # log.debug("Runner params: %s", yaml.dump(self.runner_params.params.items(), indent=2))
+        for k,v in self.runner_params.items():
+            log.debug("Runner param %s: %s", k, v)
+        if "v1beta1" in self.runner_params.get("k8s_ingress_api_version", DEFAULT_INGRESS_API_VERSION):
+            rules_spec = [
+                {
+                    "host": ep["domain"],
+                    "http": {
+                        "paths": [
+                            {
+                                "backend": {
+                                    "serviceName": self.__get_k8s_job_name(
+                                        self.__produce_k8s_job_prefix(), ajs.job_wrapper
+                                    ),
+                                    "servicePort": int(ep["tool_port"]),
+                                },
+                                "path": ep.get("entry_path", "/"),
+                                "pathType": "Prefix",
+                            }
+                        ]
+                    },
+                }
+                for ep in entry_points
+            ]
+        else:
+            rules_spec = [
+                {
+                    "host": ep["domain"],
+                    "http": {
+                        "paths": [
+                            {
+                                "backend": {
+                                    "service": {
+                                        "name": self.__get_k8s_job_name(
+                                            self.__produce_k8s_job_prefix(), ajs.job_wrapper
+                                        ),
+                                        "port": {"number": int(ep["tool_port"])},
+                                    }
+                                },
+                                "path": ep.get("entry_path", "/"),
+                                "pathType": "ImplementationSpecific",
+                            }
+                        ]
+                    },
+                }
+                for ep in entry_points
+            ]
+        log.debug("Ingress rules spec: %s", yaml.dump(rules_spec, indent=2))
+        return rules_spec
+
     def __get_k8s_ingress_spec(self, ajs):
         """The k8s spec template is nothing but a Ingress spec, except that it is nested and does not have an apiversion
         nor kind."""
@@ -992,7 +1045,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
             )
             if job_to_delete and len(job_to_delete.response["items"]) > 0:
                 k8s_job = Job(self._pykube_api, job_to_delete.response["items"][0])
-                log.debug(f"Found job with id {job.get_job_runner_external_id()} to delete")
+                log.debug("Found job with id %s to delete", job.get_job_runner_external_id())
                 # For interactive jobs, at this point because the job stopping has been partly handled by the
                 # interactive tool manager, the job wrapper no longer shows any guest ports. We need another way
                 # to check if the job is an interactive job.
