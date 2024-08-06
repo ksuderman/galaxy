@@ -2,7 +2,6 @@ from sqlalchemy import (
     false,
     select,
 )
-from sqlalchemy.orm import Session
 
 from galaxy import model
 from galaxy.exceptions import (
@@ -12,13 +11,16 @@ from galaxy.exceptions import (
     RequestParameterInvalidException,
 )
 from galaxy.managers.context import ProvidesAppContext
-from galaxy.managers.roles import get_roles_by_ids
-from galaxy.managers.users import get_users_by_ids
 from galaxy.model import Group
 from galaxy.model.base import transaction
+from galaxy.model.db.role import get_roles_by_ids
+from galaxy.model.db.user import get_users_by_ids
 from galaxy.model.scoped_session import galaxy_scoped_session
 from galaxy.schema.fields import Security
-from galaxy.schema.groups import GroupCreatePayload
+from galaxy.schema.groups import (
+    GroupCreatePayload,
+    GroupUpdatePayload,
+)
 from galaxy.structured_app import MinimalManagerApp
 
 
@@ -77,7 +79,7 @@ class GroupsManager:
         item["roles_url"] = self._url_for(trans, "group_roles", group_id=encoded_id)
         return item
 
-    def update(self, trans: ProvidesAppContext, group_id: int, payload: GroupCreatePayload):
+    def update(self, trans: ProvidesAppContext, group_id: int, payload: GroupUpdatePayload):
         """
         Modifies a group.
         """
@@ -87,13 +89,19 @@ class GroupsManager:
             self._check_duplicated_group_name(sa_session, name)
             group.name = name
             sa_session.add(group)
-        user_ids = payload.user_ids
-        users = get_users_by_ids(sa_session, user_ids)
-        role_ids = payload.role_ids
-        roles = get_roles_by_ids(sa_session, role_ids)
+
+        users = None
+        if payload.user_ids is not None:
+            users = get_users_by_ids(sa_session, payload.user_ids)
+
+        roles = None
+        if payload.role_ids is not None:
+            roles = get_roles_by_ids(sa_session, payload.role_ids)
+
         self._app.security_agent.set_entity_group_associations(
             groups=[group], roles=roles, users=users, delete_existing_assocs=False
         )
+
         with transaction(sa_session):
             sa_session.commit()
 
@@ -110,19 +118,22 @@ class GroupsManager:
             trans.sa_session.commit()
 
     def purge(self, trans: ProvidesAppContext, group_id: int):
-        group = self._get_group(trans.sa_session, group_id)
+        sa_session = trans.sa_session
+        group = self._get_group(sa_session, group_id)
         if not group.deleted:
             raise RequestParameterInvalidException(
                 f"Group '{group.name}' has not been deleted, so it cannot be purged."
             )
         # Delete UserGroupAssociations
         for uga in group.users:
-            trans.sa_session.delete(uga)
+            sa_session.delete(uga)
         # Delete GroupRoleAssociations
         for gra in group.roles:
-            trans.sa_session.delete(gra)
-        with transaction(trans.sa_session):
-            trans.sa_session.commit()
+            sa_session.delete(gra)
+        # Delete the group
+        sa_session.delete(group)
+        with transaction(sa_session):
+            sa_session.commit()
 
     def undelete(self, trans: ProvidesAppContext, group_id: int):
         group = self._get_group(trans.sa_session, group_id)
@@ -149,11 +160,11 @@ class GroupsManager:
         return group
 
 
-def get_group_by_name(session: Session, name: str):
+def get_group_by_name(session: galaxy_scoped_session, name: str):
     stmt = select(Group).filter(Group.name == name).limit(1)
     return session.scalars(stmt).first()
 
 
-def get_not_deleted_groups(session: Session):
+def get_not_deleted_groups(session: galaxy_scoped_session):
     stmt = select(Group).where(Group.deleted == false())
     return session.scalars(stmt)

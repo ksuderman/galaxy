@@ -4,12 +4,11 @@ import axios from "axios";
 
 import { fetcher } from "@/api/schema";
 import { updateTags } from "@/api/tags";
-import { getGalaxyInstance } from "@/app";
 import Filtering, { contains, equals, expandNameTag, toBool, type ValidFilter } from "@/utils/filtering";
 import { withPrefix } from "@/utils/redirect";
 import { errorMessageAsString, rethrowSimple } from "@/utils/simple-error";
 
-import type { ActionArray, FieldArray, GridConfig } from "./types";
+import { type ActionArray, type FieldArray, type GridConfig } from "./types";
 
 const { emit } = useEventBus<string>("grid-router-push");
 
@@ -28,12 +27,6 @@ type VisualizationEntry = Record<string, unknown>;
  * Request and return data from server
  */
 async function getData(offset: number, limit: number, search: string, sort_by: string, sort_desc: boolean) {
-    // TODO: Avoid using Galaxy instance to identify current user
-    const Galaxy = getGalaxyInstance();
-    const userId = !Galaxy.isAnonymous && Galaxy.user.id;
-    if (!userId) {
-        rethrowSimple("Please login to access this page.");
-    }
     const { data, headers } = await getVisualizations({
         limit,
         offset,
@@ -41,7 +34,8 @@ async function getData(offset: number, limit: number, search: string, sort_by: s
         sort_by: sort_by as SortKeyLiteral,
         sort_desc,
         show_published: false,
-        user_id: userId,
+        show_own: true,
+        show_shared: false,
     });
     const totalMatches = parseInt(headers.get("total_matches") ?? "0");
     return [data, totalMatches];
@@ -75,7 +69,9 @@ const fields: FieldArray = [
                 icon: faEye,
                 condition: (data: VisualizationEntry) => !data.deleted,
                 handler: (data: VisualizationEntry) => {
-                    window.location.href = withPrefix(`/plugins/visualizations/${data.type}/saved?id=${data.id}`);
+                    emit(`/visualizations/display?visualization=${data.type}&visualization_id=${data.id}`, {
+                        title: data.title,
+                    });
                 },
             },
             {
@@ -207,21 +203,21 @@ const validFilters: Record<string, ValidFilter<string | boolean | undefined>> = 
         menuItem: true,
     },
     published: {
-        placeholder: "Filter on published visualizations",
+        placeholder: "Published",
         type: Boolean,
         boolType: "is",
         handler: equals("published", "published", toBool),
         menuItem: true,
     },
     importable: {
-        placeholder: "Filter on importable visualizations",
+        placeholder: "Importable",
         type: Boolean,
         boolType: "is",
         handler: equals("importable", "importable", toBool),
         menuItem: true,
     },
     deleted: {
-        placeholder: "Filter on deleted visualizations",
+        placeholder: "Deleted",
         type: Boolean,
         boolType: "is",
         handler: equals("deleted", "deleted", toBool),

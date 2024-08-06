@@ -1,7 +1,10 @@
 import abc
 from typing import (
+    Any,
+    Dict,
     List,
     Optional,
+    Tuple,
 )
 
 from typing_extensions import Literal
@@ -42,8 +45,15 @@ class WorkRequestContext(ProvidesHistoryContext):
         self.__user_current_roles: Optional[List[Role]] = None
         self.__history = history
         self._url_builder = url_builder
+        self._short_term_cache: Dict[Tuple[str, ...], Any] = {}
         self.workflow_building_mode = workflow_building_mode
         self.galaxy_session = galaxy_session
+
+    def set_cache_value(self, args: Tuple[str, ...], value: Any):
+        self._short_term_cache[args] = value
+
+    def get_cache_value(self, args: Tuple[str, ...], default: Any = None) -> Any:
+        return self._short_term_cache.get(args, default)
 
     @property
     def app(self):
@@ -79,15 +89,18 @@ class WorkRequestContext(ProvidesHistoryContext):
 class GalaxyAbstractRequest:
     """Abstract interface to provide access to some request properties."""
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def base(self) -> str:
         """Base URL of the request."""
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def host(self) -> str:
         """The host address."""
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def is_secure(self) -> bool:
         """Was this a secure (https) request."""
 
@@ -99,7 +112,8 @@ class GalaxyAbstractRequest:
 class GalaxyAbstractResponse:
     """Abstract interface to provide access to some response utilities."""
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def headers(self) -> dict:
         """The response headers."""
 

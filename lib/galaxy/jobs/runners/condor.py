@@ -10,6 +10,7 @@ greater reuse of the DRM specific hooks you'll need to write. Ideally this plugi
 have been written to target that framework, but we don't have the bandwidth to rewrite
 it at this time.
 """
+
 import logging
 import os
 import subprocess
@@ -226,7 +227,7 @@ class CondorJobRunner(AsynchronousJobRunner):
             try:
                 log.info(f"stop_job(): {job.id}: trying to stop container .... ({external_id})")
                 # self.watched = [cjs for cjs in self.watched if cjs.job_id != external_id]
-                new_watch_list = list()
+                new_watch_list = []
                 cjs = None
                 for tcjs in self.watched:
                     if tcjs.job_id != external_id:

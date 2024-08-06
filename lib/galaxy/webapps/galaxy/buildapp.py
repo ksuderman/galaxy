@@ -1,6 +1,7 @@
 """
 Provides factory methods to assemble the Galaxy web application
 """
+
 import atexit
 import logging
 import sys
@@ -221,9 +222,20 @@ def app_pair(global_conf, load_app_kwds=None, wsgi_preflight=True, **kwargs):
     webapp.add_client_route("/user")
     webapp.add_client_route("/user/notifications{path:.*?}")
     webapp.add_client_route("/user/{form_id}")
+    webapp.add_client_route("/object_store_instances/create")
+    webapp.add_client_route("/object_store_instances/index")
+    webapp.add_client_route("/object_store_instances/{user_object_store_id}/edit")
+    webapp.add_client_route("/object_store_instances/{user_object_store_id}/upgrade")
+    webapp.add_client_route("/object_store_templates/{template_id}/new")
+    webapp.add_client_route("/file_source_instances/create")
+    webapp.add_client_route("/file_source_instances/index")
+    webapp.add_client_route("/file_source_instances/{user_file_source_id}/edit")
+    webapp.add_client_route("/file_source_instances/{user_file_source_id}/upgrade")
+    webapp.add_client_route("/file_source_templates/{template_id}/new")
     webapp.add_client_route("/welcome/new")
     webapp.add_client_route("/visualizations")
     webapp.add_client_route("/visualizations/edit")
+    webapp.add_client_route("/visualizations/display{path:.*?}")
     webapp.add_client_route("/visualizations/sharing")
     webapp.add_client_route("/visualizations/list_published")
     webapp.add_client_route("/visualizations/list")
@@ -262,6 +274,7 @@ def app_pair(global_conf, load_app_kwds=None, wsgi_preflight=True, **kwargs):
     webapp.add_client_route("/jobs/{job_id}/view")
     webapp.add_client_route("/workflows/list")
     webapp.add_client_route("/workflows/list_published")
+    webapp.add_client_route("/workflows/list_shared_with_me")
     webapp.add_client_route("/workflows/edit")
     webapp.add_client_route("/workflows/export")
     webapp.add_client_route("/workflows/create")
@@ -270,6 +283,8 @@ def app_pair(global_conf, load_app_kwds=None, wsgi_preflight=True, **kwargs):
     webapp.add_client_route("/workflows/trs_import")
     webapp.add_client_route("/workflows/trs_search")
     webapp.add_client_route("/workflows/invocations")
+    webapp.add_client_route("/workflows/invocations/{invocation_id}")
+    webapp.add_client_route("/workflows/invocations/import")
     webapp.add_client_route("/workflows/sharing")
     webapp.add_client_route("/workflows/{stored_workflow_id}/invocations")
     webapp.add_client_route("/workflows/invocations/report")
@@ -348,27 +363,6 @@ def populate_api_routes(webapp, app):
         path_prefix="/api/pages/{page_id}",
         controller="page_revisions",
         parent_resources=dict(member_name="page", collection_name="pages"),
-    )
-
-    webapp.mapper.connect("/api/cloud/authz/", action="index", controller="cloudauthz", conditions=dict(method=["GET"]))
-    webapp.mapper.connect(
-        "/api/cloud/authz/", action="create", controller="cloudauthz", conditions=dict(method=["POST"])
-    )
-
-    webapp.mapper.connect(
-        "delete_cloudauthz_item",
-        "/api/cloud/authz/{encoded_authz_id}",
-        action="delete",
-        controller="cloudauthz",
-        conditions=dict(method=["DELETE"]),
-    )
-
-    webapp.mapper.connect(
-        "upload_cloudauthz_item",
-        "/api/cloud/authz/{encoded_authz_id}",
-        action="update",
-        controller="cloudauthz",
-        conditions=dict(method=["PUT"]),
     )
 
     # =======================
@@ -591,9 +585,6 @@ def populate_api_routes(webapp, app):
     webapp.mapper.connect(
         "/api/workflows/menu", action="set_workflow_menu", controller="workflows", conditions=dict(method=["PUT"])
     )
-    webapp.mapper.connect(
-        "/api/workflows/{id}/refactor", action="refactor", controller="workflows", conditions=dict(method=["PUT"])
-    )
     webapp.mapper.resource("workflow", "workflows", path_prefix="/api")
 
     # ---- visualizations registry ---- generic template renderer
@@ -687,23 +678,18 @@ def populate_api_routes(webapp, app):
     #     action="import_tool_version",
     #     conditions=dict(method=["POST"]),
     # )
-
-    # API refers to usages and invocations - these mean the same thing but the
-    # usage routes should be considered deprecated.
-    invoke_names = {
-        "invocations": "",
-        "usage": "_deprecated",
-    }
-    for noun, suffix in invoke_names.items():
-        name = f"{noun}{suffix}"
-        webapp.mapper.connect(
-            f"workflow_{name}",
-            "/api/workflows/{workflow_id}/%s" % noun,
-            controller="workflows",
-            action="invoke",
-            conditions=dict(method=["POST"]),
-        )
-
+    webapp.mapper.connect(
+        "/api/workflows/{encoded_workflow_id}",
+        controller="workflows",
+        action="update",
+        conditions=dict(method=["PUT"]),
+    )
+    webapp.mapper.connect(
+        "/api/workflows",
+        controller="workflows",
+        action="create",
+        conditions=dict(method=["POST"]),
+    )
     # ================================
     # ===== USERS API =====
     # ================================

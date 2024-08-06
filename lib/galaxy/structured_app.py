@@ -1,4 +1,5 @@
 """Typed description of Galaxy's app object."""
+
 import abc
 from typing import (
     Any,
@@ -45,7 +46,10 @@ if TYPE_CHECKING:
     from galaxy.managers.collections import DatasetCollectionManager
     from galaxy.managers.hdas import HDAManager
     from galaxy.managers.histories import HistoryManager
-    from galaxy.managers.workflows import WorkflowsManager
+    from galaxy.managers.workflows import (
+        WorkflowContentsManager,
+        WorkflowsManager,
+    )
     from galaxy.tool_shed.galaxy_install.installed_repository_manager import InstalledRepositoryManager
     from galaxy.tools import ToolBox
     from galaxy.tools.cache import ToolCache
@@ -100,14 +104,16 @@ class MinimalApp(BasicSharedApp):
 
 class MinimalManagerApp(MinimalApp):
     # Minimal App that is sufficient to run Celery tasks
+    carbon_intensity: float
     file_sources: ConfiguredFileSources
     genome_builds: GenomeBuilds
+    geographical_server_location_name: str
     dataset_collection_manager: "DatasetCollectionManager"
     tool_data_tables: "ToolDataTableManager"
     history_manager: "HistoryManager"
     hda_manager: "HDAManager"
     workflow_manager: "WorkflowsManager"
-    workflow_contents_manager: Any  # 'galaxy.managers.workflows.WorkflowContentsManager'
+    workflow_contents_manager: "WorkflowContentsManager"
     library_folder_manager: Any  # 'galaxy.managers.folders.FolderManager'
     library_manager: Any  # 'galaxy.managers.libraries.LibraryManager'
     role_manager: Any  # 'galaxy.managers.roles.RoleManager'
@@ -125,11 +131,9 @@ class MinimalManagerApp(MinimalApp):
 
     @property
     @abc.abstractmethod
-    def is_job_handler(self) -> bool:
-        ...
+    def is_job_handler(self) -> bool: ...
 
-    def wait_for_toolbox_reload(self, old_toolbox: "ToolBox") -> None:
-        ...
+    def wait_for_toolbox_reload(self, old_toolbox: "ToolBox") -> None: ...
 
 
 class StructuredApp(MinimalManagerApp):

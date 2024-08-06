@@ -1,13 +1,13 @@
 """
 API operations on User objects.
 """
+
 import copy
 import json
 import logging
 import re
 from typing import (
     Any,
-    Dict,
     List,
     Optional,
     Union,
@@ -21,6 +21,7 @@ from fastapi import (
     status,
 )
 from markupsafe import escape
+from typing_extensions import Annotated
 
 from galaxy import (
     exceptions,
@@ -37,6 +38,7 @@ from galaxy.model import (
     HistoryDatasetAssociation,
     Role,
     UserAddress,
+    UserObjectstoreUsage,
     UserQuotaUsage,
 )
 from galaxy.model.base import transaction
@@ -53,12 +55,12 @@ from galaxy.schema.schema import (
     FavoriteObjectsSummary,
     FavoriteObjectType,
     FlexibleUserIdType,
-    LimitedUserModel,
+    MaybeLimitedUserModel,
     RemoteUserCreationPayload,
     UserBeaconSetting,
     UserCreationPayload,
     UserDeletionPayload,
-    UserModel,
+    UserUpdatePayload,
 )
 from galaxy.security.validate_user_input import (
     validate_email,
@@ -132,7 +134,6 @@ RecalculateDiskUsageResponseDescriptions = {
     },
 }
 
-UserDeletionBody = Body(default=None, title="Purge user", description="Purge the user.")
 UserUpdateBody = Body(default=..., title="Update user", description="The user values to update.")
 FavoriteObjectBody = Body(
     default=..., title="Set favorite", description="The id of an object the user wants to favorite."
@@ -201,7 +202,7 @@ class FastAPIUsers:
         f_email: Optional[str] = FilterEmailQueryParam,
         f_name: Optional[str] = FilterNameQueryParam,
         f_any: Optional[str] = FilterAnyQueryParam,
-    ) -> List[Union[UserModel, LimitedUserModel]]:
+    ) -> List[MaybeLimitedUserModel]:
         return self.service.get_index(trans=trans, deleted=True, f_email=f_email, f_name=f_name, f_any=f_any)
 
     @router.post(
@@ -304,6 +305,21 @@ class FastAPIUsers:
             return []
 
     @router.get(
+        "/api/users/{user_id}/objectstore_usage",
+        name="get_user_objectstore_usage",
+        summary="Return the user's object store usage summary broken down by object store ID",
+    )
+    def objectstore_usage(
+        self,
+        trans: ProvidesUserContext = DependsOnTrans,
+        user_id: FlexibleUserIdType = FlexibleUserIdPathParam,
+    ) -> List[UserObjectstoreUsage]:
+        if user := self.service.get_user_full(trans, user_id, False):
+            return user.dictify_objectstore_usage()
+        else:
+            return []
+
+    @router.get(
         "/api/users/{user_id}/usage/{label}",
         name="get_user_usage_for_label",
         summary="Return the user's quota usage summary for a given quota source label",
@@ -365,7 +381,7 @@ class FastAPIUsers:
         return payload
 
     @router.delete(
-        "/api/users/{user_id}/favorites/{object_type}/{object_id}",
+        "/api/users/{user_id}/favorites/{object_type}/{object_id:path}",
         name="remove_favorite",
         summary="Remove the object from user's favorites",
     )
@@ -514,6 +530,7 @@ class FastAPIUsers:
             else:
                 build_dict["fasta"] = trans.security.decode_id(len_value)
                 dataset = trans.sa_session.get(HistoryDatasetAssociation, int(build_dict["fasta"]))
+                assert dataset
                 try:
                     new_len = dataset.get_converted_dataset(trans, "len")
                     new_linecount = new_len.get_converted_dataset(trans, "linecount")
@@ -633,7 +650,7 @@ class FastAPIUsers:
         f_email: Optional[str] = FilterEmailQueryParam,
         f_name: Optional[str] = FilterNameQueryParam,
         f_any: Optional[str] = FilterAnyQueryParam,
-    ) -> List[Union[UserModel, LimitedUserModel]]:
+    ) -> List[MaybeLimitedUserModel]:
         return self.service.get_index(trans=trans, deleted=deleted, f_email=f_email, f_name=f_name, f_any=f_any)
 
     @router.get(
@@ -657,13 +674,14 @@ class FastAPIUsers:
         self,
         trans: ProvidesUserContext = DependsOnTrans,
         user_id: FlexibleUserIdType = FlexibleUserIdPathParam,
-        payload: Dict[Any, Any] = UserUpdateBody,
+        payload: UserUpdatePayload = UserUpdateBody,
         deleted: Optional[bool] = UserDeletedQueryParam,
     ) -> DetailedUserModel:
         deleted = deleted or False
         current_user = trans.user
         user_to_update = self.service.get_non_anonymous_user_full(trans, user_id, deleted=deleted)
-        self.service.user_deserializer.deserialize(user_to_update, payload, user=current_user, trans=trans)
+        data = payload.model_dump(exclude_unset=True)
+        self.service.user_deserializer.deserialize(user_to_update, data, user=current_user, trans=trans)
         return self.service.user_to_detailed_model(user_to_update)
 
     @router.delete(
@@ -675,13 +693,17 @@ class FastAPIUsers:
         self,
         user_id: UserIdPathParam,
         trans: ProvidesUserContext = DependsOnTrans,
-        payload: Optional[UserDeletionPayload] = UserDeletionBody,
+        purge: Annotated[
+            bool,
+            Query(
+                title="Purge user",
+                description="Whether to definitely remove this user. Only deleted users can be purged.",
+            ),
+        ] = False,
+        payload: Optional[UserDeletionPayload] = None,
     ) -> DetailedUserModel:
         user_to_update = self.service.user_manager.by_id(user_id)
-        if payload:
-            purge = payload.purge
-        else:
-            purge = False
+        purge = payload and payload.purge or purge
         if trans.user_is_admin:
             if purge:
                 log.debug("Purging user %s", user_to_update)
@@ -737,7 +759,7 @@ class UserAPIController(BaseGalaxyAPIController, UsesTagsMixin, BaseUIController
         """
         if not preferences:
             return []
-        extra_pref_inputs = list()
+        extra_pref_inputs = []
         # Build sections for different categories of inputs
         user_vault = UserVaultWrapper(trans.app.vault, user)
         for item, value in preferences.items():
@@ -786,7 +808,7 @@ class UserAPIController(BaseGalaxyAPIController, UsesTagsMixin, BaseUIController
         user = self._get_user(trans, id)
         email = user.email
         username = user.username
-        inputs = list()
+        inputs = []
         user_info = {
             "email": email,
             "username": username,
@@ -955,7 +977,7 @@ class UserAPIController(BaseGalaxyAPIController, UsesTagsMixin, BaseUIController
             user.values = form_values
 
         # Update values for extra user preference items
-        extra_user_pref_data = dict()
+        extra_user_pref_data = {}
         extra_pref_keys = self._get_extra_user_preferences(trans)
         user_vault = UserVaultWrapper(trans.app.vault, user)
         if extra_pref_keys is not None:
@@ -1133,7 +1155,7 @@ class UserAPIController(BaseGalaxyAPIController, UsesTagsMixin, BaseUIController
         return {"message": "Toolbox filters have been saved."}
 
     def _add_filter_inputs(self, factory, filter_types, inputs, errors, filter_type, saved_values):
-        filter_inputs = list()
+        filter_inputs = []
         filter_values = saved_values.get(filter_type, [])
         filter_config = filter_types[filter_type]["config"]
         filter_title = filter_types[filter_type]["title"]

@@ -3,7 +3,7 @@ import { defineStore } from "pinia";
 import { computed, ref, set } from "vue";
 
 import { getAppRoot } from "@/onload/loadConfig";
-import type { Steps } from "@/stores/workflowStepStore";
+import { type Steps } from "@/stores/workflowStepStore";
 
 export interface Workflow {
     name: string;
@@ -11,6 +11,7 @@ export interface Workflow {
     steps: Steps;
     step_count?: number;
     latest_id?: string;
+    version: number;
 }
 
 export const useWorkflowStore = defineStore("workflowStore", () => {

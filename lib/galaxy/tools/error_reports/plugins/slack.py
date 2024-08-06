@@ -1,4 +1,5 @@
 """The module describes the ``slack`` error plugin plugin."""
+
 import logging
 import uuid
 from typing import (
@@ -6,16 +7,17 @@ from typing import (
     Dict,
 )
 
-import requests
-
-from galaxy.util import string_as_bool
+from galaxy.util import (
+    requests,
+    string_as_bool,
+)
 from .base_git import BaseGitPlugin
 
 log = logging.getLogger(__name__)
 
 
 class SlackPlugin(BaseGitPlugin):
-    """Send error report to Sentry."""
+    """Send error report to Slack."""
 
     plugin_type = "slack"
 

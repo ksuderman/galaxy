@@ -3,7 +3,7 @@ import { library } from "@fortawesome/fontawesome-svg-core";
 import { faChevronLeft, faChevronRight } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { useDebounce, useDraggable } from "@vueuse/core";
-import { computed, type PropType, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { useTimeoutThrottle } from "@/composables/throttle";
 
@@ -13,25 +13,25 @@ const { throttle } = useTimeoutThrottle(10);
 
 library.add(faChevronLeft, faChevronRight);
 
-const props = defineProps({
-    collapsible: {
-        type: Boolean,
-        default: true,
-    },
-    side: {
-        type: String as PropType<"left" | "right">,
-        default: "right",
-    },
+interface Props {
+    collapsible?: boolean;
+    side?: "left" | "right";
+    minWidth?: number;
+    maxWidth?: number;
+    defaultWidth?: number;
+}
+const props = withDefaults(defineProps<Props>(), {
+    collapsible: true,
+    side: "right",
+    minWidth: 200,
+    maxWidth: 800,
+    defaultWidth: 300,
 });
-
-const minWidth = 200;
-const maxWidth = 800;
-const defaultWidth = 300;
 
 const draggable = ref<HTMLElement | null>(null);
 const root = ref<HTMLElement | null>(null);
 
-const panelWidth = ref(defaultWidth);
+const panelWidth = ref(props.defaultWidth);
 const show = ref(true);
 
 const { position, isDragging } = useDraggable(draggable, {
@@ -49,8 +49,8 @@ const hoverDraggableOrToggle = computed(
     () => (hoverDraggableDebounced.value || hoverToggle.value) && !isDragging.value
 );
 
-const toggleLinger = 1000;
-const toggleShowDelay = 100;
+const toggleLinger = 500;
+const toggleShowDelay = 600;
 let showToggleTimeout: ReturnType<typeof setTimeout> | undefined;
 
 watch(
@@ -79,9 +79,38 @@ watch(position, () => {
 
         const rectRoot = root.value.getBoundingClientRect();
         const rectDraggable = draggable.value.getBoundingClientRect();
-        panelWidth.value = determineWidth(rectRoot, rectDraggable, minWidth, maxWidth, props.side, position.value.x);
+        panelWidth.value = determineWidth(
+            rectRoot,
+            rectDraggable,
+            props.minWidth,
+            props.maxWidth,
+            props.side,
+            position.value.x
+        );
     });
 });
+
+/** If the `maxWidth` changes, prevent the panel from exceeding it */
+watch(
+    () => props.maxWidth,
+    (newVal) => {
+        if (newVal && panelWidth.value > newVal) {
+            panelWidth.value = props.maxWidth;
+        }
+    },
+    { immediate: true }
+);
+
+/** If the `minWidth` changes, ensure the panel width is at least the `minWidth` */
+watch(
+    () => props.minWidth,
+    (newVal) => {
+        if (newVal && panelWidth.value < newVal) {
+            panelWidth.value = newVal;
+        }
+    },
+    { immediate: true }
+);
 
 function onKeyLeft() {
     if (props.side === "left") {
@@ -100,11 +129,11 @@ function onKeyRight() {
 }
 
 function increaseWidth(by = 50) {
-    panelWidth.value = Math.min(panelWidth.value + by, maxWidth);
+    panelWidth.value = Math.min(panelWidth.value + by, props.maxWidth);
 }
 
 function decreaseWidth(by = 50) {
-    panelWidth.value = Math.max(panelWidth.value - by, minWidth);
+    panelWidth.value = Math.max(panelWidth.value - by, props.minWidth);
 }
 
 const sideClasses = computed(() => ({
@@ -169,44 +198,66 @@ const sideClasses = computed(() => ({
 <style scoped lang="scss">
 @import "theme/blue.scss";
 
+$border-width: 6px;
+
 .flex-panel {
     z-index: 100;
     flex-shrink: 0;
     display: flex;
     width: var(--width);
     position: relative;
-    border-color: $border-color;
-    border-width: 1px;
+    border-color: transparent;
+    border-width: $border-width;
     box-shadow: 1px 0 transparent;
     transition: border-color 0.1s, box-shadow 0.1s;
     align-items: stretch;
     flex-direction: column;
 
+    &::after {
+        content: "";
+        position: absolute;
+        height: 100%;
+        width: 1px;
+        background-color: $border-color;
+    }
+
     &.show-hover {
         border-color: $brand-info;
 
-        &.left {
-            box-shadow: 1px 0 $brand-info;
-        }
-
-        &.right {
-            box-shadow: -1px 0 $brand-info;
+        &::after {
+            background-color: $brand-info;
         }
     }
 
     &.left {
         border-right-style: solid;
 
+        &::after {
+            right: -1px;
+        }
+
         .drag-handle {
-            right: -0.75rem;
+            right: -$border-width;
+
+            &:hover {
+                right: calc(-1 * $border-width - var(--hover-expand) / 2);
+            }
         }
     }
 
     &.right {
         border-left-style: solid;
 
+        &::after {
+            left: -1px;
+        }
+
         .drag-handle {
-            left: -0.75rem;
+            left: -$border-width;
+
+            &:hover {
+                left: calc(-1 * $border-width - var(--hover-expand) / 2);
+            }
         }
     }
 }
@@ -214,13 +265,18 @@ const sideClasses = computed(() => ({
 .drag-handle {
     background: none;
     border: none;
+    border-radius: 0;
     position: absolute;
-    width: 1rem;
+    width: $border-width;
     padding: 0;
     height: 100%;
+    z-index: 10000;
+
+    --hover-expand: 4px;
 
     &:hover {
         cursor: ew-resize;
+        width: calc($border-width + var(--hover-expand));
     }
 }
 

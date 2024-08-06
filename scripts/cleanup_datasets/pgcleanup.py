@@ -143,22 +143,22 @@ class Action:
         else:
             logf = os.path.join(self._log_dir, self.name + ".log")
         if self._dry_run:
-            log.info("--dry-run specified, logging changes to stderr instead of log file: %s" % logf)
+            log.info("--dry-run specified, logging changes to stderr instead of log file: %s", logf)
             h = set_log_handler()
         else:
-            log.info("Opening log file: %s" % logf)
+            log.info("Opening log file: %s", logf)
             h = set_log_handler(filename=logf)
         h.setLevel(logging.DEBUG if self._debug else logging.INFO)
         h.setFormatter(LevelFormatter())
         self.__log = logging.getLogger(self.name)
         self.__log.addHandler(h)
         self.__log.propagate = False
-        m = ("==== Log opened: %s " % datetime.datetime.now().isoformat()).ljust(72, "=")
+        m = (f"==== Log opened: {datetime.datetime.now().isoformat()} ").ljust(72, "=")
         self.__log.info(m)
-        self.__log.info(f"Epoch time for this action: {self._epoch_time}")
+        self.__log.info("Epoch time for this action: %s", self._epoch_time)
 
     def __close_log(self):
-        m = ("==== Log closed: %s " % datetime.datetime.now().isoformat()).ljust(72, "=")
+        m = (f"==== Log closed: {datetime.datetime.now().isoformat()} ").ljust(72, "=")
         self.log.info(m)
         self.__log = None
 
@@ -450,7 +450,7 @@ class RemovesDatasets(RemovesObjects):
             extra_dir = f"dataset_{dataset.uuid}_files"
         else:
             extra_dir = f"dataset_{dataset.id}_files"
-        self.remove_from_object_store(dataset, dict())
+        self.remove_from_object_store(dataset, {})
         self.remove_from_object_store(
             dataset, dict(dir_only=True, extra_dir=extra_dir), entire_dir=True, check_exists=True
         )
@@ -912,7 +912,8 @@ class PurgeHistorylessHDAs(PurgesHDAs, RemovesMetadataFiles, RequiresDiskUsageRe
                      FROM dataset
                     WHERE history_id IS NULL{force_retry_sql}{object_store_id_sql}
                           AND history_dataset_association.update_time < (NOW() AT TIME ZONE 'utc' - interval '%(days)s days')
-                RETURNING id),
+                RETURNING history_dataset_association.id as id,
+                          history_dataset_association.history_id as history_id),
              hda_events
           AS (INSERT INTO cleanup_event_hda_association
                           (create_time, cleanup_event_id, hda_id)
@@ -920,12 +921,15 @@ class PurgeHistorylessHDAs(PurgesHDAs, RemovesMetadataFiles, RequiresDiskUsageRe
                      FROM purged_hda_ids),
              {purge_hda_dependencies_sql}
       SELECT purged_hda_ids.id AS purged_hda_id,
+             history.user_id AS recalculate_disk_usage_user_id,
              deleted_metadata_file_ids.id AS deleted_metadata_file_id,
              deleted_metadata_file_ids.uuid AS deleted_metadata_file_uuid,
              deleted_metadata_file_ids.object_store_id AS object_store_id,
              deleted_icda_ids.id AS deleted_icda_id,
              deleted_icda_ids.hda_id AS deleted_icda_hda_id
         FROM purged_hda_ids
+             LEFT OUTER JOIN history
+                             ON purged_hda_ids.history_id = history.id
              LEFT OUTER JOIN deleted_metadata_file_ids
                              ON deleted_metadata_file_ids.hda_id = purged_hda_ids.id
              LEFT OUTER JOIN deleted_icda_ids
@@ -1217,7 +1221,7 @@ class Cleanup:
             self.__conn = psycopg2.connect(cursor_factory=NamedTupleCursor, **args)
             # TODO: is this per session or cursor?
             if self.args.work_mem is not None:
-                log.info("Setting work_mem to %s" % self.args.work_mem)
+                log.info("Setting work_mem to %s", self.args.work_mem)
                 self.__conn.cursor().execute("SET work_mem TO %s", (self.args.work_mem,))
         return self.__conn
 
@@ -1267,7 +1271,7 @@ class Cleanup:
             nargs="*",
             metavar="ACTION",
             default=[],
-            help="Action(s) to perform, chosen from: %s" % ", ".join(sorted(self.actions.keys())),
+            help="Action(s) to perform, chosen from: {}".format(", ".join(sorted(self.actions.keys()))),
         )
         self.args = parser.parse_args()
 
@@ -1288,7 +1292,7 @@ class Cleanup:
         ok = True
         for name in self.args.actions:
             if name not in self.actions.keys():
-                log.error("Unknown action in sequence: %s" % name)
+                log.error("Unknown action in sequence: %s", name)
                 ok = False
         if not ok:
             log.critical("Exiting due to previous error(s)")
@@ -1377,7 +1381,7 @@ class Cleanup:
             self.__current_action = name
             with cls(self) as action:
                 self._run_action(action)
-            log.info("Finished %s" % name)
+            log.info("Finished %s", name)
 
 
 if __name__ == "__main__":

@@ -6,14 +6,14 @@ from sqlalchemy import (
     select,
     true,
 )
-from sqlalchemy.orm import Session
 
 from galaxy import util
 from galaxy.managers.context import ProvidesUserContext
 from galaxy.managers.groups import get_group_by_name
 from galaxy.managers.quotas import QuotaManager
-from galaxy.managers.users import get_user_by_email
 from galaxy.model import Quota
+from galaxy.model.db.user import get_user_by_email
+from galaxy.model.scoped_session import galaxy_scoped_session
 from galaxy.quota._schema import (
     CreateQuotaParams,
     CreateQuotaResult,
@@ -55,13 +55,13 @@ class QuotasService(ServiceBase):
             encoded_id = Security.security.encode_id(quota.id)
             item["url"] = url_for(route, id=encoded_id)
             rval.append(item)
-        return QuotaSummaryList.model_construct(root=rval)
+        return QuotaSummaryList(root=rval)
 
     def show(self, trans: ProvidesUserContext, id: DecodedDatabaseIdField, deleted: bool = False) -> QuotaDetails:
         """Displays information about a quota."""
         quota = self.quota_manager.get_quota(trans, id, deleted=deleted)
         rval = quota.to_dict(view="element", value_mapper={"total_disk_usage": float})
-        return QuotaDetails.model_construct(**rval)
+        return QuotaDetails(**rval)
 
     def create(self, trans: ProvidesUserContext, params: CreateQuotaParams) -> CreateQuotaResult:
         """Creates a new quota."""
@@ -71,7 +71,7 @@ class QuotasService(ServiceBase):
         item = quota.to_dict()
         item["url"] = url_for("quota", id=Security.security.encode_id(quota.id))
         item["message"] = message
-        return CreateQuotaResult.model_construct(**item)
+        return CreateQuotaResult(**item)
 
     def update(self, trans: ProvidesUserContext, id: DecodedDatabaseIdField, params: UpdateQuotaParams) -> str:
         """Modifies a quota."""
@@ -161,9 +161,7 @@ class QuotasService(ServiceBase):
         payload["in_groups"] = list(map(str, new_in_groups))
 
 
-def get_quotas(session: Session, deleted: bool = False):
-    is_deleted = true()
-    if not deleted:
-        is_deleted = false()
+def get_quotas(session: galaxy_scoped_session, deleted: bool = False):
+    is_deleted = true() if deleted else false()
     stmt = select(Quota).where(Quota.deleted == is_deleted)
     return session.scalars(stmt)

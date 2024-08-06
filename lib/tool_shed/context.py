@@ -24,7 +24,8 @@ class ProvidesAppContext(Protocol):
     Mixed in class must provide `app` property.
     """
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def app(self) -> ToolShedApp:
         """Provide access to the shed ``app`` object."""
 
@@ -54,7 +55,8 @@ class ProvidesUserContext(ProvidesAppContext, Protocol):
     properties.
     """
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def user(self) -> Optional[User]:
         """Provide access to the user object."""
 
@@ -74,35 +76,33 @@ class ProvidesUserContext(ProvidesAppContext, Protocol):
 
 
 class ProvidesRepositoriesContext(ProvidesUserContext, Protocol):
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def repositories_hostname(self) -> str:
         """Provide access to hostname used by target mercurial server."""
 
 
 class SessionRequestContext(ProvidesRepositoriesContext, Protocol):
     @abc.abstractmethod
-    def get_galaxy_session(self) -> Optional[GalaxySession]:
-        ...
+    def get_galaxy_session(self) -> Optional[GalaxySession]: ...
 
     @abc.abstractmethod
-    def set_galaxy_session(self, galaxy_session: GalaxySession):
-        ...
+    def set_galaxy_session(self, galaxy_session: GalaxySession): ...
 
-    @abc.abstractproperty
-    def request(self) -> GalaxyAbstractRequest:
-        ...
+    @property
+    @abc.abstractmethod
+    def request(self) -> GalaxyAbstractRequest: ...
 
-    @abc.abstractproperty
-    def response(self) -> GalaxyAbstractResponse:
-        ...
+    @property
+    @abc.abstractmethod
+    def response(self) -> GalaxyAbstractResponse: ...
 
     @abc.abstractmethod
-    def url_builder(self):
-        ...
+    def url_builder(self): ...
 
-    @abc.abstractproperty
-    def session_csrf_token(self) -> str:
-        ...
+    @property
+    @abc.abstractmethod
+    def session_csrf_token(self) -> str: ...
 
 
 class SessionRequestContextImpl(SessionRequestContext):

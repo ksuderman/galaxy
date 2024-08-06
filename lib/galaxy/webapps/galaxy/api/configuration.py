@@ -2,6 +2,7 @@
 API operations allowing clients to determine Galaxy instance's capabilities
 and configuration settings.
 """
+
 import logging
 from typing import (
     Any,
@@ -36,6 +37,12 @@ EncodedIdPathParam = Path(
     ...,
     title="Encoded id",
     description="Encoded id to be decoded",
+)
+
+DecodedIdPathParam = Path(
+    ...,
+    title="Decoded id",
+    description="Decoded id to be encoded",
 )
 
 
@@ -101,6 +108,16 @@ class FastAPIConfiguration:
     def decode_id(self, encoded_id: str = EncodedIdPathParam) -> Dict[str, int]:
         """Decode a given id."""
         return self.configuration_manager.decode_id(encoded_id)
+
+    @router.get(
+        "/api/configuration/encode/{decoded_id}",
+        require_admin=True,
+        summary="Encode a given id",
+        response_description="Encoded id",
+    )
+    def encode_id(self, decoded_id: int = DecodedIdPathParam) -> Dict[str, str]:
+        """Decode a given id."""
+        return self.configuration_manager.encode_id(decoded_id)
 
     @router.get(
         "/api/configuration/tool_lineages",

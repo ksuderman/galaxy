@@ -16,7 +16,6 @@ from typing import (
 from urllib.parse import quote
 
 import jwt
-import requests
 from oauthlib.common import generate_nonce
 from requests_oauthlib import OAuth2Session
 
@@ -30,12 +29,13 @@ from galaxy.model import (
 )
 from galaxy.model.base import transaction
 from galaxy.model.orm.util import add_object_to_object_session
+from galaxy.util import requests
 from . import IdentityProvider
 
 try:
     import pkce
 except ImportError:
-    pkce = None  # type: ignore[assignment]
+    pkce = None  # type: ignore[assignment, unused-ignore]
 
 log = logging.getLogger(__name__)
 STATE_COOKIE_NAME = "galaxy-oidc-state"
@@ -343,7 +343,7 @@ class OIDCAuthnzBase(IdentityProvider):
             trans.sa_session.commit()
         return login_redirect_url, user
 
-    def disconnect(self, provider, trans, email=None, disconnect_redirect_url=None):
+    def disconnect(self, provider, trans, disconnect_redirect_url=None, email=None, association_id=None):
         try:
             user = trans.user
             index = 0

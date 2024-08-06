@@ -1,6 +1,7 @@
 """
 Contains library functions
 """
+
 import json
 import logging
 import os.path
@@ -264,7 +265,7 @@ class LibraryActions:
             if not os.path.exists(path):
                 bad_paths.append(path)
         if bad_paths:
-            message = 'Invalid paths: "%s".' % '", "'.join(bad_paths)
+            message = 'Invalid paths: "{}".'.format('", "'.join(bad_paths))
             response_code = 400
             return None, response_code, message
         return None

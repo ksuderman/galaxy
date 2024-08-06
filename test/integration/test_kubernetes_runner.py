@@ -1,4 +1,5 @@
 """Integration tests for the Kubernetes runner."""
+
 # Tested on docker for mac 18.06.1-ce-mac73 using the default kubernetes setup,
 # also works on minikube
 import collections
@@ -132,21 +133,21 @@ def job_config(jobs_directory: str) -> Config:
             <param id="limits_cpu">1.1</param>
             <param id="limits_memory">100M</param>
             <param id="docker_enabled">true</param>
-            <param id="docker_default_container_id">busybox:ubuntu-14.04</param>
+            <param id="docker_default_container_id">busybox:1.36.1-glibc</param>
             <env id="SOME_ENV_VAR">42</env>
         </destination>
         <destination id="k8s_destination_walltime_short" runner="k8s_walltime_short">
             <param id="limits_cpu">1.1</param>
             <param id="limits_memory">100M</param>
             <param id="docker_enabled">true</param>
-            <param id="docker_default_container_id">busybox:ubuntu-14.04</param>
+            <param id="docker_default_container_id">busybox:1.36.1-glibc</param>
             <env id="SOME_ENV_VAR">42</env>
         </destination>
         <destination id="k8s_destination_no_cleanup" runner="k8s_no_cleanup">
             <param id="limits_cpu">1.1</param>
             <param id="limits_memory">100M</param>
             <param id="docker_enabled">true</param>
-            <param id="docker_default_container_id">busybox:ubuntu-14.04</param>
+            <param id="docker_default_container_id">busybox:1.36.1-glibc</param>
             <env id="SOME_ENV_VAR">42</env>
         </destination>
         <destination id="local_dest" runner="local">
@@ -190,6 +191,7 @@ class TestKubernetesIntegration(BaseJobEnvironmentIntegrationTestCase, MulledJob
     jobs_directory: str
     persistent_volume_claims: List[KubeSetupConfigTuple]
     persistent_volumes: List[KubeSetupConfigTuple]
+    container_type = "docker"
 
     def setUp(self) -> None:
         super().setUp()
@@ -345,12 +347,10 @@ class TestKubernetesIntegration(BaseJobEnvironmentIntegrationTestCase, MulledJob
         external_id = job.job_runner_external_id
 
         @overload
-        def get_kubectl_logs(allow_wait: Literal[False]) -> str:
-            ...
+        def get_kubectl_logs(allow_wait: Literal[False]) -> str: ...
 
         @overload
-        def get_kubectl_logs(allow_wait: bool = True) -> Optional[str]:
-            ...
+        def get_kubectl_logs(allow_wait: bool = True) -> Optional[str]: ...
 
         def get_kubectl_logs(allow_wait: bool = True) -> Optional[str]:
             log_cmd = ["kubectl", "logs", "-l", f"job-name={external_id}"]

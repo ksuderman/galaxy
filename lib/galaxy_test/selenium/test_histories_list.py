@@ -47,8 +47,7 @@ class TestSavedHistories(SharedStateSeleniumTestCase):
 
         self.navigate_to_histories_page()
         self.components.histories.advanced_search_toggle.wait_for_and_click()
-        self.components.histories.advanced_search_filter(filter="published").wait_for_and_click()
-        self.components.histories.advanced_search_submit.wait_for_and_click()
+        self.check_advanced_search_filter("published")
         self.sleep_for(self.wait_types.UX_RENDER)
 
         self.assert_histories_in_grid([self.history2_name])
@@ -85,8 +84,7 @@ class TestSavedHistories(SharedStateSeleniumTestCase):
         self.assert_histories_in_grid([self.history2_name], False)
 
         self.components.histories.advanced_search_toggle.wait_for_and_click()
-        self.components.histories.advanced_search_filter(filter="deleted").wait_for_and_click()
-        self.components.histories.advanced_search_submit.wait_for_and_click()
+        self.check_advanced_search_filter("deleted")
         self.sleep_for(self.wait_types.UX_RENDER)
 
         # Restore the history
@@ -113,11 +111,43 @@ class TestSavedHistories(SharedStateSeleniumTestCase):
         self.assert_histories_in_grid([self.history4_name], False)
 
         self.components.histories.advanced_search_toggle.wait_for_and_click()
-        self.components.histories.advanced_search_filter(filter="deleted").wait_for_and_click()
-        self.components.histories.advanced_search_submit.wait_for_and_click()
+        self.check_advanced_search_filter("purged")
         self.sleep_for(self.wait_types.UX_RENDER)
 
         self.assert_histories_in_grid([self.history4_name])
+
+    @selenium_test
+    def test_delete_and_undelete_multiple_histories(self):
+        self._login()
+        self.navigate_to_histories_page()
+
+        delete_button_selector = 'button[data-description="grid batch delete"]'
+        undelete_button_selector = 'button[data-description="grid batch restore"]'
+
+        # Select multiple histories
+        self.check_grid_rows("#histories-grid", [self.history2_name, self.history3_name])
+
+        # Delete multiple histories
+        self.wait_for_and_click_selector(delete_button_selector)
+        alert = self.driver.switch_to.alert
+        alert.accept()
+
+        # Display deleted histories
+        self.components.histories.advanced_search_toggle.wait_for_and_click()
+        self.check_advanced_search_filter("deleted")
+
+        # Select multiple histories
+        self.sleep_for(self.wait_types.UX_RENDER)
+        self.check_grid_rows("#histories-grid", [self.history2_name, self.history3_name])
+
+        # Undelete multiple histories
+        self.wait_for_and_click_selector(undelete_button_selector)
+        alert = self.driver.switch_to.alert
+        alert.accept()
+
+        # Verify deleted histories have been undeleted
+        self.components.histories.reset_input.wait_for_and_click()
+        self.assert_histories_in_grid([self.history2_name, self.history3_name])
 
     @selenium_test
     def test_sort_by_name(self):
@@ -141,7 +171,6 @@ class TestSavedHistories(SharedStateSeleniumTestCase):
     def test_standard_search(self):
         self._login()
         self.navigate_to_histories_page()
-        self.sleep_for(self.wait_types.UX_RENDER)
         self.components.histories.search_input.wait_for_and_send_keys(self.history2_name)
         self.assert_grid_histories_are([self.history2_name])
         self.components.histories.reset_input.wait_for_and_click()
@@ -152,45 +181,38 @@ class TestSavedHistories(SharedStateSeleniumTestCase):
     def test_advanced_search(self):
         self._login()
         self.navigate_to_histories_page()
-        self.sleep_for(self.wait_types.UX_RENDER)
         # search by name
         self.components.histories.advanced_search_toggle.wait_for_and_click()
         self.components.histories.advanced_search_name_input.wait_for_and_send_keys(self.history3_name)
-        self.components.histories.advanced_search_submit.wait_for_and_click()
         self.assert_histories_present([self.history3_name])
 
         self.components.histories.reset_input.wait_for_and_click()
 
-        self.components.histories.advanced_search_toggle.wait_for_and_click()
         self.components.histories.advanced_search_name_input.wait_for_and_send_keys(self.history2_name)
-        self.components.histories.advanced_search_submit.wait_for_and_click()
         self.assert_histories_present([self.history2_name])
 
         self.components.histories.reset_input.wait_for_and_click()
 
-        self.components.histories.advanced_search_toggle.wait_for_and_click()
         self.components.histories.advanced_search_name_input.wait_for_and_send_keys(self.history4_name)
-        self.components.histories.advanced_search_submit.wait_for_and_click()
         self.assert_histories_present([])
 
         self.components.histories.reset_input.wait_for_and_click()
 
         # search by tags
-        self.components.histories.advanced_search_toggle.wait_for_and_click()
         self.components.histories.advanced_search_tag_area.wait_for_and_click()
         input_element = self.components.histories.advanced_search_tag_input.wait_for_visible()
         input_element.send_keys(self.history3_tags[0])
         self.send_enter(input_element)
         self.sleep_for(self.wait_types.UX_RENDER)
-        self.components.histories.advanced_search_submit.wait_for_and_click()
         self.assert_histories_present([self.history3_name])
 
     @retry_assertion_during_transitions
     def assert_histories_present(self, expected_histories, sort_by_matters=False):
         present_histories = self.get_present_histories()
         assert len(present_histories) == len(expected_histories)
+        name_column = 1
         for index, row in enumerate(present_histories):
-            cell = row.find_elements(By.TAG_NAME, "td")[0]
+            cell = row.find_elements(By.TAG_NAME, "td")[name_column]
             if not sort_by_matters:
                 assert cell.text in expected_histories
             else:
@@ -206,7 +228,7 @@ class TestSavedHistories(SharedStateSeleniumTestCase):
         self.navigate_to_histories_page()
 
         # Insert a tag
-        tag_column = 3
+        tag_column = 4
         tags_cell = self.select_grid_cell("#histories-grid", self.history2_name, tag_column)
         self.add_tag(tags_cell, self.history2_tags[0])
 
@@ -239,7 +261,7 @@ class TestSavedHistories(SharedStateSeleniumTestCase):
             assert intersection == set()
 
     def get_histories(self):
-        return self.histories_get_history_names()
+        return self.get_grid_entry_names("#histories-grid")
 
     def add_tag(self, tags_cell, tag):
         tag_button = tags_cell.find_element(By.CSS_SELECTOR, ".stateless-tags button")

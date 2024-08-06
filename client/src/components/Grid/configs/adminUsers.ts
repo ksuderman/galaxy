@@ -15,13 +15,13 @@ import { useEventBus } from "@vueuse/core";
 import axios from "axios";
 
 import { createApiKey, deleteUser, recalculateDiskUsageByUserId, sendActivationEmail, undeleteUser } from "@/api/users";
-import type { GalaxyConfiguration } from "@/stores/configurationStore";
+import { type GalaxyConfiguration } from "@/stores/configurationStore";
 import Filtering, { contains, equals, toBool, type ValidFilter } from "@/utils/filtering";
 import _l from "@/utils/localization";
 import { withPrefix } from "@/utils/redirect";
 import { errorMessageAsString } from "@/utils/simple-error";
 
-import type { ActionArray, FieldArray, GridConfig } from "./types";
+import { type ActionArray, type FieldArray, type GridConfig } from "./types";
 
 const { emit } = useEventBus<string>("grid-router-push");
 
@@ -310,14 +310,14 @@ const validFilters: Record<string, ValidFilter<string | boolean | undefined>> = 
     email: { placeholder: "email", type: String, handler: contains("email"), menuItem: true },
     username: { placeholder: "username", type: String, handler: contains("username"), menuItem: true },
     deleted: {
-        placeholder: "Filter on deleted users",
+        placeholder: "Deleted",
         type: Boolean,
         boolType: "is",
         handler: equals("deleted", "deleted", toBool),
         menuItem: true,
     },
     purged: {
-        placeholder: "Filter on purged users",
+        placeholder: "Purged",
         type: Boolean,
         boolType: "is",
         handler: equals("purged", "purged", toBool),
@@ -337,7 +337,7 @@ const gridConfig: GridConfig = {
     plural: "Users",
     sortBy: "email",
     sortDesc: true,
-    sortKeys: ["active", "create_time", "disk_usage", "email", "external", "last_login", "status", "username"],
+    sortKeys: ["active", "create_time", "disk_usage", "email", "external", "last_login", "username"],
     title: "Users",
 };
 

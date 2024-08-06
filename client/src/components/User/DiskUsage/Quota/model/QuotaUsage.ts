@@ -1,4 +1,4 @@
-import type { components } from "@/api/schema";
+import { type components } from "@/api/schema";
 import { bytesToString } from "@/utils/utils";
 
 export const DEFAULT_QUOTA_SOURCE_LABEL = "Default";
@@ -15,11 +15,15 @@ export class QuotaUsage {
         this._data = data;
     }
 
+    get rawSourceLabel(): string | null {
+        return this._data.quota_source_label ?? null;
+    }
+
     /**
      * The name of the ObjectStore associated with the quota.
      */
     get sourceLabel(): string {
-        return this._data.quota_source_label ?? DEFAULT_QUOTA_SOURCE_LABEL;
+        return this.rawSourceLabel ?? DEFAULT_QUOTA_SOURCE_LABEL;
     }
 
     /**

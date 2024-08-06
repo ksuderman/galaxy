@@ -33,15 +33,15 @@ VALID_FIELDNAME_RE = re.compile(r"^[a-zA-Z0-9\_]+$")
 
 class FormsGrid(grids.GridData):
     # Custom column types
-    class NameColumn(grids.TextColumn):
+    class NameColumn(grids.GridColumn):
         def get_value(self, trans, grid, form):
             return form.latest_form.name
 
-    class DescriptionColumn(grids.TextColumn):
+    class DescriptionColumn(grids.GridColumn):
         def get_value(self, trans, grid, form):
             return form.latest_form.desc
 
-    class TypeColumn(grids.TextColumn):
+    class TypeColumn(grids.GridColumn):
         def get_value(self, trans, grid, form):
             return form.latest_form.type
 
@@ -69,8 +69,7 @@ class FormsGrid(grids.GridData):
         }
         deleted = False
         query = query.join(model.FormDefinition, self.model_class.latest_form_id == model.FormDefinition.id)
-        search_query = kwargs.get("search")
-        if search_query:
+        if search_query := kwargs.get("search"):
             parsed_search = parse_filters_structured(search_query, INDEX_SEARCH_FILTERS)
             for term in parsed_search.terms:
                 if isinstance(term, FilteredTerm):

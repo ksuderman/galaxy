@@ -1,6 +1,7 @@
 """
 API operations on the contents of a history dataset.
 """
+
 import logging
 from io import (
     BytesIO,
@@ -8,9 +9,7 @@ from io import (
     StringIO,
 )
 from typing import (
-    Any,
     cast,
-    Dict,
     List,
     Optional,
 )
@@ -39,7 +38,6 @@ from galaxy.schema.schema import (
     AsyncTaskResultSummary,
     DatasetAssociationRoles,
     DatasetSourceType,
-    UpdateDatasetPermissionsPayload,
 )
 from galaxy.util.zipstream import ZipstreamWrapper
 from galaxy.webapps.base.api import GalaxyFileResponse
@@ -51,10 +49,11 @@ from galaxy.webapps.galaxy.api import (
 from galaxy.webapps.galaxy.api.common import (
     get_filter_query_params,
     get_query_parameters_from_request_excluding,
-    get_update_permission_payload,
     HistoryDatasetIDPathParam,
     HistoryIDPathParam,
+    normalize_permission_payload,
     query_serialization_params,
+    UpdateDatasetPermissionsBody,
 )
 from galaxy.webapps.galaxy.services.datasets import (
     ComputeDatasetHashPayload,
@@ -68,6 +67,7 @@ from galaxy.webapps.galaxy.services.datasets import (
     DeleteDatasetBatchPayload,
     DeleteDatasetBatchResult,
     RequestDataType,
+    UpdateObjectStoreIdPayload,
 )
 
 log = logging.getLogger(__name__)
@@ -139,6 +139,7 @@ class FastAPIDatasets:
     @router.get(
         "/api/datasets",
         summary="Search datasets or collections using a query system.",
+        response_model_exclude_unset=True,
     )
     def index(
         self,
@@ -232,15 +233,11 @@ class FastAPIDatasets:
     def update_permissions(
         self,
         dataset_id: HistoryDatasetIDPathParam,
+        payload: UpdateDatasetPermissionsBody,
         trans=DependsOnTrans,
-        # Using a generic Dict here as an attempt on supporting multiple aliases for the permissions params.
-        payload: Dict[str, Any] = Body(
-            default=...,
-            examples=[UpdateDatasetPermissionsPayload()],
-        ),
     ) -> DatasetAssociationRoles:
         """Set permissions of the given history dataset to the given role ids."""
-        update_payload = get_update_permission_payload(payload)
+        update_payload = normalize_permission_payload(payload)
         return self.service.update_permissions(trans, dataset_id, update_payload)
 
     @router.get(
@@ -484,3 +481,16 @@ class FastAPIDatasets:
         payload: ComputeDatasetHashPayload = Body(...),
     ) -> AsyncTaskResultSummary:
         return self.service.compute_hash(trans, dataset_id, payload, hda_ldda=hda_ldda)
+
+    @router.put(
+        "/api/datasets/{dataset_id}/object_store_id",
+        summary="Update an object store ID for a dataset you own.",
+        operation_id="datasets__update_object_store_id",
+    )
+    def update_object_store_id(
+        self,
+        dataset_id: HistoryDatasetIDPathParam,
+        trans=DependsOnTrans,
+        payload: UpdateObjectStoreIdPayload = Body(...),
+    ) -> None:
+        self.service.update_object_store_id(trans, dataset_id, payload)
