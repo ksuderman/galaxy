@@ -15,3 +15,4 @@ def get_logger(name=None):
     logger = logging.getLogger(name)
     logger.trace = types.MethodType(trace, logger)
     return logger
+

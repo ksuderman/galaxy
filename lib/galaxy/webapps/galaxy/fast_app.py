@@ -13,6 +13,8 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
 from galaxy.schema.generics import CustomJsonSchema
+from galaxy.util.logging import addTraceLoggingLevel
+
 from galaxy.version import VERSION
 from galaxy.webapps.base.api import (
     add_exception_handler,
@@ -176,6 +178,7 @@ def get_openapi_schema() -> Dict[str, Any]:
 
 
 def initialize_fast_app(gx_wsgi_webapp, gx_app):
+    addTraceLoggingLevel()
     root_path = "" if gx_app.config.galaxy_url_prefix == "/" else gx_app.config.galaxy_url_prefix
     app = get_fastapi_instance(root_path=root_path)
     add_exception_handler(app)

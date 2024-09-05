@@ -182,7 +182,10 @@ from .structured_app import (
     StructuredApp,
 )
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d - %(message)s')
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
+
+
 log = logging.getLogger(__name__)
 app = None
 
@@ -222,7 +225,7 @@ class SentryClientMixin:
                 "CRITICAL",
             ], f"Invalid sentry event level '{self.config.sentry.event_level}'"
 
-            import sentry_sdk
+            import sentry_sdkgb
             from sentry_sdk.integrations.logging import LoggingIntegration
 
             sentry_logging = LoggingIntegration(

@@ -1,0 +1,256 @@
+<?xml version="1.0"?>
+<toolbox>
+    <!--
+    This is Galaxy's integrated tool panel and should be modified directly only for
+    reordering tools inside a section. Each time Galaxy starts up, this file is
+    synchronized with the various tool config files: tools, sections and labels
+    added to one of these files, will be added also here in the appropriate place,
+    while elements removed from the tool config files will be correspondingly
+    deleted from this file.
+    To modify locally managed tools (e.g. from tool_conf.xml) modify that file
+    directly and restart Galaxy. Whenever possible Tool Shed managed tools (e.g.
+    from shed_tool_conf.xml) should be managed from within the Galaxy interface or
+    via its API - but if changes are necessary (such as to hide a tool or re-assign
+    its section) modify that file and restart Galaxy.
+    -->
+    <section id="getext" name="Get Data" version="">
+
+        <tool id="upload1" />
+
+        <tool id="ucsc_table_direct1" />
+
+        <tool id="ucsc_table_direct_archaea1" />
+
+        <tool id="ncbi_datasets_source" />
+
+        <tool id="sra_source" />
+
+        <tool id="ebi_sra_main" />
+
+        <tool id="modENCODEfly" />
+
+        <tool id="intermine" />
+
+        <tool id="flymine" />
+
+        <tool id="modmine" />
+
+        <tool id="mousemine" />
+
+        <tool id="ratmine" />
+
+        <tool id="yeastmine" />
+
+        <tool id="modENCODEworm" />
+
+        <tool id="wormbase" />
+
+        <tool id="zebrafishmine" />
+
+        <tool id="eupathdb" />
+
+        <tool id="hbvar" />
+
+    </section>
+
+    <section id="send" name="Send Data" version="">
+
+        <tool id="send_to_cloud" />
+
+        <tool id="export_remote" />
+
+    </section>
+
+    <section id="collection_operations" name="Collection Operations" version="">
+
+        <tool id="__UNZIP_COLLECTION__" />
+
+        <tool id="__ZIP_COLLECTION__" />
+
+        <tool id="__FILTER_FAILED_DATASETS__" />
+
+        <tool id="__FILTER_EMPTY_DATASETS__" />
+
+        <tool id="__FLATTEN__" />
+
+        <tool id="__MERGE_COLLECTION__" />
+
+        <tool id="__RELABEL_FROM_FILE__" />
+
+        <tool id="__FILTER_FROM_FILE__" />
+
+        <tool id="__SORTLIST__" />
+
+        <tool id="__HARMONIZELISTS__" />
+
+        <tool id="__TAG_FROM_FILE__" />
+
+        <tool id="__APPLY_RULES__" />
+
+        <tool id="__BUILD_LIST__" />
+
+        <tool id="__EXTRACT_DATASET__" />
+
+        <tool id="__DUPLICATE_FILE_TO_COLLECTION__" />
+
+    </section>
+
+    <section id="expression_tools" name="Expression Tools" version="">
+
+        <tool id="param_value_from_file" />
+
+    </section>
+
+    <section id="liftOver" name="Lift-Over" version="">
+
+        <tool id="liftOver1" />
+
+    </section>
+
+    <section id="textutil" name="Text Manipulation" version="">
+
+        <tool id="addValue" />
+
+        <tool id="cat1" />
+
+        <tool id="Cut1" />
+
+        <tool id="mergeCols1" />
+
+        <tool id="Convert characters1" />
+
+        <tool id="createInterval" />
+
+        <tool id="ChangeCase" />
+
+        <tool id="Paste1" />
+
+        <tool id="Remove beginning1" />
+
+        <tool id="random_lines1" />
+
+        <tool id="Show beginning1" />
+
+        <tool id="Show tail1" />
+
+        <tool id="trimmer" />
+
+        <tool id="wc_gnu" />
+
+        <tool id="secure_hash_message_digest" />
+
+    </section>
+
+    <section id="convert" name="Convert Formats" version="">
+
+        <tool id="bed2gff1" />
+
+        <tool id="gff2bed1" />
+
+        <tool id="MAF_To_BED1" />
+
+        <tool id="MAF_To_Interval1" />
+
+        <tool id="MAF_To_Fasta1" />
+
+        <tool id="Sff_extractor" />
+
+        <tool id="wig_to_bigWig" />
+
+        <tool id="bed_to_bigBed" />
+
+    </section>
+
+    <section id="filter" name="Filter and Sort" version="">
+
+        <tool id="Filter1" />
+
+        <tool id="sort1" />
+
+        <tool id="Grep1" />
+
+        <label id="gff" text="GFF" version="" />
+
+        <tool id="Extract_features1" />
+
+        <tool id="gff_filter_by_attribute" />
+
+        <tool id="gff_filter_by_feature_count" />
+
+        <tool id="gtf_filter_by_attribute_values_list" />
+
+    </section>
+
+    <section id="group" name="Join, Subtract and Group" version="">
+
+        <tool id="join1" />
+
+        <tool id="comp1" />
+
+        <tool id="Grouping1" />
+
+    </section>
+
+    <section id="fetchAlignSeq" name="Fetch Alignments/Sequences" version="">
+
+        <tool id="Interval2Maf_pairwise1" />
+
+        <tool id="MAF_split_blocks_by_species1" />
+
+        <tool id="Interval_Maf_Merged_Fasta2" />
+
+        <tool id="GeneBed_Maf_Fasta2" />
+
+        <tool id="maf_stats1" />
+
+        <tool id="MAF_Thread_For_Species1" />
+
+        <tool id="MAF_Limit_To_Species1" />
+
+        <tool id="maf_limit_size1" />
+
+        <tool id="maf_by_block_number1" />
+
+        <tool id="MAF_Reverse_Complement_1" />
+
+        <tool id="MAF_filter" />
+
+    </section>
+
+    <section id="bxops" name="Operate on Genomic Intervals" version="">
+
+        <tool id="wiggle2simple1" />
+
+        <tool id="aggregate_scores_in_intervals2" />
+
+        <tool id="gene2exon1" />
+
+    </section>
+
+    <section id="stats" name="Statistics" version="">
+
+        <tool id="Summary_Statistics1" />
+
+        <tool id="Count1" />
+
+    </section>
+
+    <section id="plots" name="Graph/Display Data" version="">
+
+        <tool id="vcf_to_maf_customtrack1" />
+
+    </section>
+
+    <section id="hgv" name="Phenotype Association" version="">
+
+        <tool id="hgv_linkToGProfile" />
+
+        <tool id="hgv_david" />
+
+        <tool id="hgv_ldtools" />
+
+        <tool id="master2pgSnp" />
+
+    </section>
+
+</toolbox>

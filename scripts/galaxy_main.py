@@ -32,6 +32,9 @@ try:
 except ImportError:
     Daemonize = None
 
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
+
 log = logging.getLogger(__name__)
 
 real_file = os.path.realpath(__file__)

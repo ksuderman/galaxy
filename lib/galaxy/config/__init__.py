@@ -160,7 +160,9 @@ def configure_logging(config, facts=None):
     """
     facts = facts or get_facts(config=config)
     # Get root logger
-    logging.addLevelName(LOGLV_TRACE, "TRACE")
+    # TODO: remove this line.
+    # logging.addLevelName(LOGLV_TRACE, "TRACE")
+
     # PasteScript will have already configured the logger if the
     # 'loggers' section was found in the config file, otherwise we do
     # some simple setup using the 'log_*' values from the config.
