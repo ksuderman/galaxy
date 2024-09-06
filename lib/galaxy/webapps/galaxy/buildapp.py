@@ -13,6 +13,10 @@ from urllib.parse import urljoin
 from paste import httpexceptions
 from tuswsgi import TusMiddleware
 
+# This needs to be done before we start importing Galaxy modules.
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
+
 import galaxy.app
 import galaxy.datatypes.registry
 import galaxy.model
