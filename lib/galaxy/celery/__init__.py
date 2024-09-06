@@ -24,6 +24,10 @@ from celery.signals import (
 )
 from kombu import serialization
 
+# This needs to be done before we start importing other Galaxy modules
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
+
 from galaxy.celery.base_task import GalaxyTaskBeforeStart
 from galaxy.config import Configuration
 from galaxy.main_config import find_config

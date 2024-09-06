@@ -7,7 +7,7 @@ def addTraceLoggingLevel():
 def addLoggingLevel(levelName, levelNum, methodName=None):
     """
     A modified version of the method found at https://stackoverflow.com/a/35804945/1691778
-    Rather than raising an AttributeError we simply return in the case that the levelName or methodName already exist.
+    Rather than raising an AttributeError we simply return if the levelName or methodName already exist.
 
     Comprehensively adds a new logging level to the `logging` module and the
     currently configured logging class.
