@@ -29,11 +29,11 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
 
 
     """
-    if hasattr(logging, levelName) or hasattr(logging, methodName) or hasattr(logging.getLoggerClass(), methodName):
-        return
-
     if not methodName:
         methodName = levelName.lower()
+
+    if hasattr(logging, levelName) or hasattr(logging, methodName) or hasattr(logging.getLoggerClass(), methodName):
+        return
 
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d - %(message)s')
