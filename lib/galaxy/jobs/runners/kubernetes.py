@@ -49,6 +49,7 @@ from galaxy.util import unicodify
 from galaxy.util.bytesize import ByteSize
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.TRACE)
 
 __all__ = ("KubernetesJobRunner",)
 
@@ -65,6 +66,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
     LABEL_REGEX = re.compile("[^-A-Za-z0-9_.]")
 
     def __init__(self, app, nworkers, **kwargs):
+        log.trace("Initializing KubernetesJobRunner")
         # Check if pykube was importable, fail if not
         ensure_pykube()
         runner_param_specs = dict(
@@ -130,15 +132,18 @@ class KubernetesJobRunner(AsynchronousJobRunner):
         self.setup_base_volumes()
 
     def setup_base_volumes(self):
+        log.trace("Setting up base volumes for KubernetesJobRunner")
         def generate_volumes(pvc_list):
             return [{"name": pvc["name"], "persistentVolumeClaim": {"claimName": pvc["name"]}} for pvc in pvc_list]
 
         def get_volume_mounts_for(claim):
+            log.trace("Getting volume mounts for %s", claim)
             if self.runner_params.get(claim):
                 volume_mounts = [parse_pvc_param_line(pvc) for pvc in self.runner_params[claim].split(",")]
                 # generate default list of volumes for all jobs
                 volumes = generate_volumes(volume_mounts)
                 return volumes, volume_mounts
+            log.trace("No volume mounts found for %s", claim)
             return [], []
 
         self.runner_params["k8s_volumes"], self.runner_params["k8s_volume_mounts"] = get_volume_mounts_for(
@@ -172,6 +177,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
             modify_command_for_container=False,
             stream_stdout_stderr=True,
         ):
+            log.warning("Unable to prepare job for %s", job_wrapper.get_id_tag())
             return
 
         script = self.get_job_file(

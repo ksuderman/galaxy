@@ -206,6 +206,7 @@ if TYPE_CHECKING:
     from galaxy.tools.actions.metadata import SetMetadataToolAction
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.TRACE)
 
 REQUIRES_JS_RUNTIME_MESSAGE = (
     "The tool [%s] requires a nodejs runtime to execute "
@@ -2300,7 +2301,7 @@ class Tool(UsesDictVisibleKeys):
 
     def exec_after_process(self, app, inp_data, out_data, param_dict, job=None, **kwds):
         # pass
-        log.debug("exec_after_process: %s", self.id)
+        log.trace("exec_after_process: %s", self.id)
 
     def job_failed(self, job_wrapper, message, exception=False):
         """
@@ -2929,7 +2930,7 @@ class ExpressionTool(Tool):
             json.dump(expression_inputs, f)
 
     def exec_after_process(self, app, inp_data, out_data, param_dict, job=None, **kwds):
-        log.debug("ExpressionTool.exec_after_process")
+        log.trace("ExpressionTool.exec_after_process")
         for key, val in self.outputs.items():
             if key not in out_data:
                 # Skip filtered outputs
@@ -3104,7 +3105,7 @@ class SetMetadataTool(Tool):
             self.app.job_manager.enqueue(job=job, tool=self)
 
     def exec_after_process(self, app, inp_data, out_data, param_dict, job=None, **kwds):
-        log.debug("SetMetadataTool.exec_after_process")
+        log.trace("SetMetadataTool.exec_after_process")
         working_directory = app.object_store.get_filename(job, base_dir="job_work", dir_only=True, obj_dir=True)
         for name, dataset in inp_data.items():
             external_metadata = get_metadata_compute_strategy(app.config, job.id, tool_id=self.id)
@@ -3163,7 +3164,7 @@ class ImportHistoryTool(Tool):
     tool_type = "import_history"
 
     def exec_after_process(self, app, inp_data, out_data, param_dict, job, final_job_state=None, **kwds):
-        log.debug("ImportHistoryTool.exec_after_process")
+        log.trace("ImportHistoryTool.exec_after_process")
         super().exec_after_process(app, inp_data, out_data, param_dict, job=job, **kwds)
         if final_job_state != DETECTED_JOB_STATE.OK:
             return
@@ -3190,7 +3191,7 @@ class InteractiveTool(Tool):
 
     def exec_after_process(self, app, inp_data, out_data, param_dict, job=None, **kwds):
         # run original exec_after_process
-        log.debug("InteractiveTool.exec_after_process")
+        log.trace("InteractiveTool.exec_after_process")
         super().exec_after_process(app, inp_data, out_data, param_dict, job=job, **kwds)
         self.__remove_interactivetool_by_job(job)
 
@@ -3211,7 +3212,7 @@ class DataManagerTool(OutputParameterJSONTool):
             self.data_manager_id = self.id
 
     def exec_after_process(self, app, inp_data, out_data, param_dict, job=None, final_job_state=None, **kwds):
-        log.debug("DataManagerTool.exec_after_process")
+        log.trace("DataManagerTool.exec_after_process")
         #assert self.allow_user_access(job.user), "You must be an admin to access this tool."
         if not self.allow_user_access(job.user):
             log.warning("User %s attempted to access a data manager tool, but is not an admin.", job.user.username)

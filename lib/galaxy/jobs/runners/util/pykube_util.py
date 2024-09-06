@@ -5,6 +5,8 @@ import os
 import re
 from pathlib import PurePath
 
+import yaml
+
 try:
     from pykube.config import KubeConfig
     from pykube.exceptions import HTTPError
@@ -29,6 +31,7 @@ except ImportError as exc:
     )
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.TRACE)
 
 DEFAULT_JOB_API_VERSION = "batch/v1"
 DEFAULT_SERVICE_API_VERSION = "v1"
@@ -276,7 +279,11 @@ def get_volume_mounts_for_job(job_wrapper, data_claim=None, working_claim=None):
     if working_claim:
         volume_mounts.extend(generate_relative_mounts(working_claim, [job_wrapper.working_directory]))
 
-    return deduplicate_entries(volume_mounts)
+
+    volume_mounts = deduplicate_entries(volume_mounts)
+    log.trace("Volume mounts for job %s", job_wrapper.job_id)
+    log.trace(yaml.safe_dump(volume_mounts))
+    return volume_mounts
 
 
 def galaxy_instance_id(params):
