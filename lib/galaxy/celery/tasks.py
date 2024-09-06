@@ -14,7 +14,7 @@ from sqlalchemy import (
 )
 
 
-This needs to be done before we start importing other Galaxy modules
+# This needs to be done before we start importing other Galaxy modules
 from galaxy.util.logging import addTraceLoggingLevel
 addTraceLoggingLevel()
 
