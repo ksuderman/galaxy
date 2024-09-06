@@ -29,6 +29,8 @@ from galaxy.webapps.galaxy.api.common import (
 )
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.TRACE)
+log.trace("Setting the log level to TRACE for %s", __name__)
 
 router = Router(tags=["configuration"])
 
@@ -87,6 +89,7 @@ class FastAPIConfiguration:
     )
     def version(self) -> Dict[str, Any]:
         """Return Galaxy version information: major/minor version, optional extra info."""
+        log.trace("Getting Galaxy version information: %s", self.configuration_manager.version())
         return self.configuration_manager.version()
 
     @router.get(
