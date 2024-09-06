@@ -205,6 +205,9 @@ if TYPE_CHECKING:
     from galaxy.managers.jobs import JobSearch
     from galaxy.tools.actions.metadata import SetMetadataToolAction
 
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.TRACE)
 
