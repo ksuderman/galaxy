@@ -66,6 +66,8 @@ from galaxy.tools.data_fetch import do_fetch
 from galaxy.util import galaxy_directory
 from galaxy.util.custom_logging import get_logger
 
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
 log = get_logger(__name__)
 
 
