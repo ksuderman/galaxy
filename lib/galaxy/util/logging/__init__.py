@@ -1,7 +1,34 @@
-import logging
+import logging as python_logging
+
+Logger = python_logging.Logger
+LogRecord = python_logging.LogRecord
+Handler = python_logging.Handler
+Filter = python_logging.Filter
+Formatter = python_logging.Formatter
+NOTSET = python_logging.NOTSET
+TRACE = python_logging.DEBUG - 5
+DEBUG = python_logging.DEBUG
+INFO = python_logging.INFO
+WARN = python_logging.WARN
+WARNING = python_logging.WARNING
+ERROR = python_logging.ERROR
+FATAL = python_logging.FATAL
+CRITICAL = python_logging.CRITICAL
+
+def getLogger(name):
+    return python_logging.getLogger(name)
+
+def basicConfig(**kwargs):
+    python_logging.basicConfig(**kwargs)
+
+def getLoggerClass():
+    return python_logging.getLoggerClass()
+
+def getLevelName(level):
+    return python_logging.getLevelName(level)
 
 def addTraceLoggingLevel():
-    addLoggingLevel('TRACE', logging.DEBUG - 5)
+    addLoggingLevel('TRACE', python_logging.DEBUG - 5)
 
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
@@ -32,11 +59,11 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
     if not methodName:
         methodName = levelName.lower()
 
-    if hasattr(logging, levelName) or hasattr(logging, methodName) or hasattr(logging.getLoggerClass(), methodName):
-        logging.warning("Attempted to add logging level %s with level number %d and method name %s, but one or more already exist", levelName, levelNum, methodName)
+    if hasattr(python_logging, levelName) or hasattr(python_logging, methodName) or hasattr(python_logging.getLoggerClass(), methodName):
+        python_logging.warning("Attempted to add logging level %s with level number %d and method name %s, but one or more already exist", levelName, levelNum, methodName)
         return
 
-    logging.basicConfig(level=logging.DEBUG,
+    python_logging.basicConfig(level=python_logging.DEBUG,
                         format='%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d - %(message)s')
 
     # if hasattr(logging, levelName):
@@ -53,10 +80,12 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
         if self.isEnabledFor(levelNum):
             self._log(levelNum, message, args, **kwargs)
     def logToRoot(message, *args, **kwargs):
-        logging.log(levelNum, message, *args, **kwargs)
+        python_logging.log(levelNum, message, *args, **kwargs)
 
-    logging.addLevelName(levelNum, levelName)
-    setattr(logging, levelName, levelNum)
-    setattr(logging.getLoggerClass(), methodName, logForLevel)
-    setattr(logging, methodName, logToRoot)
-    logging.info("Trace level logging has been enabled")
+    python_logging.addLevelName(levelNum, levelName)
+    setattr(python_logging, levelName, levelNum)
+    setattr(python_logging.getLoggerClass(), methodName, logForLevel)
+    setattr(python_logging, methodName, logToRoot)
+    python_logging.info("Trace level logging has been enabled")
+
+addTraceLoggingLevel()

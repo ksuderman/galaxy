@@ -1,6 +1,8 @@
 import collections
 import errno
-import logging
+# import logging
+# This needs to be done before any other imports to ensure all logging is captured
+from galaxy.util import logging
 import os
 import signal
 import sys
@@ -182,8 +184,8 @@ from .structured_app import (
     StructuredApp,
 )
 
-from galaxy.util.logging import addTraceLoggingLevel
-addTraceLoggingLevel()
+# from galaxy.util.logging import addTraceLoggingLevel
+# addTraceLoggingLevel()
 
 
 log = logging.getLogger(__name__)

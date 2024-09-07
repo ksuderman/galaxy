@@ -2,7 +2,8 @@
 
 import http.client
 import json
-import logging
+# import logging
+from galaxy.util import logging
 import os
 import random
 import shutil
