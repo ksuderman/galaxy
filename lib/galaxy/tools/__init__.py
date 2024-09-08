@@ -5,6 +5,7 @@ Classes encapsulating galaxy tools and tool configuration.
 import itertools
 import json
 import logging
+# from galaxy.util import logging
 import math
 import os
 import re
