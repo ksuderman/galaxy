@@ -1,15 +1,16 @@
-from typing import List
+import logging
+from typing import Dict, List
 
-from galaxy.util import logging
+from galaxy.managers.context import ProvidesUserContext
 
 from pydantic import (
     BaseModel,
     Field,
 )
 
-log = logging.getLogger(__name__)
-log.info("Created log for %s", __name__)
+from galaxy.webapps.galaxy.api import DependsOnTrans
 
+log = logging.getLogger(__name__)
 
 class LoggerLevelInfo(BaseModel):
     name: str = Field(
@@ -29,53 +30,66 @@ class LoggerLevelInfo(BaseModel):
     )
 
 
-class LoggerLevels(BaseModel):
-    loggers: List[LoggerLevelInfo] = Field(
-        ...,
-        title="Loggers",
-        description="The list of loggers and their levels."
-    )
+# class LoggerLevels(BaseModel):
+#     loggers: Dict[str, LoggerLevelInfo] = Field(
+#         ...,
+#         title="Loggers",
+#         description="The list of loggers and their levels."
+#     )
 
 
 class LoggingManager:
-    def __init__(self):
-        log.info("Created LoggingManager")
 
-    async def _get_logger_info(self, trans, logger) -> LoggerLevelInfo:
-        return {"name": logger.name, "level": logging.getLevelName(logger.level), "effective": logging.getLevelName(logger.getEffectiveLevel())}
+    def _get_logger_info(self, logger) -> LoggerLevelInfo:
+        return LoggerLevelInfo(
+            name=logger.name,
+            level=logging.getLevelName(logger.level),
+            effective=logging.getLevelName(logger.getEffectiveLevel())
+        )
 
-    async def index(self, trans) -> List[str]:
+    def index(self, trans: ProvidesUserContext = DependsOnTrans) -> List[str]:
         log.trace("Getting log index")
         logger_dict = logging.Logger.manager.loggerDict
         loggers = [name for name in logger_dict if isinstance(logger_dict[name], logging.Logger)]
         return loggers
 
-    async def get(self, trans, name=None) -> LoggerLevelInfo:
-        if name is None:
-            return self.index()
-        return self.get_logger_level(name)
+    # def get(self, name:str , trans: ProvidesUserContext = DependsOnTrans) -> LoggerLevelInfo:
+    #     log.info("Getting logger info for %s", name)
+    #     if name is None:
+    #         return self.index()
+    #     return self.get_logger_level(name, trans)
 
     # def get_loggers(self, trans) -> List[str]:
     #     return self.index()
     #
-    # def get_logger_levels(self, trans) -> LoggerLevels:
-    #     log.debug("Getting logger levels")
-    #     logger_info = {}
-    #     for name in self.index():
-    #         logger = logging.getLogger(name)
-    #         logger_info[name] =  self._get_logger_info(logger)
-    #     return logger_info
-    #
-    # def get_logger_level(self, trans, name) -> LoggerLevelInfo:
-    #     log.debug("Getting level for logger %s", name)
-    #     loggers = self.index()
-    #     if name in loggers:
-    #         logger = logging.getLogger(name)
-    #         return self._get_logger_info(logger)
-    #     log.warning("Logger %s not found", name)
-    #     return {"name": name, "level": logging.NOTSET, "effective": logging.NOTSET}
+    def get_logger_levels(self, trans: ProvidesUserContext = DependsOnTrans) -> Dict[str, LoggerLevelInfo]:
+        log.trace("Getting logger levels")
+        loggers = {}
+        for name in self.index():
+            logger = logging.getLogger(name)
+            loggers[name] = self._get_logger_info(logger)
+        return loggers
 
-    def set_logger_level(self, trans, name, level):
+    def get_logger_level(self, name, trans: ProvidesUserContext = DependsOnTrans) -> LoggerLevelInfo:
+        log.trace("Getting level for logger %s", name)
+        loggers = self.index(trans)
+        if name in loggers:
+            logger = logging.getLogger(name)
+            return self._get_logger_info(logger)
+        log.warning("Logger %s not found", name)
+        return LoggerLevelInfo(name=name, level="NOTSET", effective="NOTSET")
+
+    def set_logger_level(self, name, level, trans: ProvidesUserContext = DependsOnTrans) -> LoggerLevelInfo:
         log.debug("Setting level for logger %s to %s", name, level)
         logger = logging.getLogger(name)
         logger.setLevel(level)
+        return self._get_logger_info(logger)
+
+    def test(self, trans: ProvidesUserContext = DependsOnTrans) -> str:
+        log.trace("TRACE message")
+        log.debug("DEBUG message")
+        log.info("INFO message")
+        log.warning("WARNING message")
+        log.error("ERROR message")
+        log.critical("CRITICAL message")
+        return "Test OK"

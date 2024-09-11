@@ -535,6 +535,8 @@ class BaseAppConfiguration(HasDynamicProperties):
     def _check_against_root(self, key):
         def get_path(current_path, initial_path):
             # if path does not exist and was set as relative:
+            if initial_path is None:
+                return current_path
             if not self._path_exists(current_path) and not os.path.isabs(initial_path):
                 new_path = self._in_root_dir(initial_path)
                 if self._path_exists(new_path):  # That's a bingo!

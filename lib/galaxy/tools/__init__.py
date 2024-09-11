@@ -4,6 +4,8 @@ Classes encapsulating galaxy tools and tool configuration.
 
 import itertools
 import json
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
 import logging
 import math
 import os

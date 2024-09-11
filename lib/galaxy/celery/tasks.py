@@ -15,8 +15,8 @@ from sqlalchemy import (
 
 
 # This needs to be done before we start importing other Galaxy modules
-from galaxy.util.logging import addTraceLoggingLevel
-addTraceLoggingLevel()
+# from galaxy.util.logging import addTraceLoggingLevel
+# addTraceLoggingLevel()
 
 from galaxy import model
 from galaxy.celery import (
