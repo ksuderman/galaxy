@@ -1,0 +1,53 @@
+<tool id="stanford_corenlp_4.5.7" name="Stanford CoreNLP Annotators" version="0.1.0+galaxy0" python_template_version="3.5" profile="21.05">
+    <requirements>
+		<requirement type="binary">java</requirement>    
+    </requirements>
+    <command detect_errors="exit_code"><![CDATA[
+    java -cp corenlp-4.5.7.jar -annotators tokenize,ssplit --outputFormat xml -file $input && mv ${input}.xml $outputFile
+    ]]></command>
+    <inputs>
+	    <param format="txt" name="input" type="data" label="Input text"/>
+        <!--
+	    <section name="annotators" title="Annotators">
+	    	<param name="pos" type="boolean" label="Part of speech"/>
+	    	<param name="lemma" type="boolean" label="Lemma"/>
+	    	<param name="ner" type="boolean" label="Named entities"/>
+	    	<param name="depparse" type="boolean" label="Dependency parser"/>
+	    	<param name="coref" type="boolean" label="Coreference"/>
+	    </section>
+    	<param name="outputFormat" type="select" label="Output format">  
+    		<option value="txt">Text (ad hoc human readable)</option>
+    		<option value="xml">XML</option>
+    		<option value="json">JSON</option>
+    		<option value="conll">CoNLL (TSV)</option>
+    	</param>
+    	-->
+    </inputs>
+    <outputs>
+    	<data name="outputFile" format="txt"/>
+    </outputs>
+    <tests>
+    	<test>
+    		<param name="input" value="test_data/input.txt"/>
+            <!--
+    		<param name="pos" value="false"/>
+    		<param name="lemma" value="false"/>
+    		<param name="ner" value="false"/>
+    		<param name="depparse" value="false"/>
+    		<param name="coref" value="false"/>
+    		<output name="outputFile">
+    		<assert_contents>
+    			<has_n_elements_with_path n="3" path="/root/document/sentences/sentence"/>
+    			<has_n_elements_with_path n="22" path="/root/document/sentences/sentence/tokens/token"/>
+    		</assert_contents>
+    		</output>
+    		-->
+    	</test>
+    </tests>
+    <help><![CDATA[
+    Stanford CoreNLP annotators.
+    ]]></help>
+    <citations>
+    	<citation type="doi">10.3115/v1/P14-5010</citation>
+    </citations>
+</tool>
