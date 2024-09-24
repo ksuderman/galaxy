@@ -78,6 +78,7 @@ def test_set_level():
     manager = LoggingManager()
     loggers = manager.index()
     assert 'test' in loggers
+    assert manager.get_logger_level('test').level == 'WARNING'
     manager.set_logger_level('test', 'DEBUG')
     assert manager.get_logger_level('test').level == 'DEBUG'
 
