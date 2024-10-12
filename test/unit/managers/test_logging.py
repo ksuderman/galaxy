@@ -1,5 +1,8 @@
 import logging.config
+import types
 
+
+from galaxy.util.logging import TRACE
 from galaxy.managers.logging import LoggingManager
 
 
@@ -38,6 +41,14 @@ SIMPLE_LOGGING_CONFIG = {
         }
     },
 }
+
+def test_trace_level_exists():
+    assert hasattr(logging, 'TRACE')
+    assert hasattr(logging, 'trace')
+    assert logging.TRACE == TRACE
+    assert type(getattr(logging, 'TRACE')) == int
+    assert isinstance(getattr(logging, 'trace'), types.FunctionType)
+
 
 def test_logging_manager_index():
     logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
@@ -86,3 +97,48 @@ def test_set_level():
     # assert manager.get_logger_level('test').level == 'WARNING'
     # assert manager.set_logger_level('test', 'DEBUG').level == 'DEBUG'
     # assert manager.get_logger_level('test').level == 'DEBUG'
+
+
+def test_set_levels():
+    import logging
+    logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
+    manager = LoggingManager()
+
+    a = logging.getLogger('a')
+    ab = logging.getLogger('a.b')
+    abc = logging.getLogger('a.b.c')
+
+    assert a.getEffectiveLevel() == logging.DEBUG
+    assert ab.getEffectiveLevel() == logging.DEBUG
+    assert abc.getEffectiveLevel() == logging.DEBUG
+
+    manager.set_logger_levels('a.*', 'INFO')
+    assert a.getEffectiveLevel() == logging.INFO
+    assert ab.getEffectiveLevel() == logging.INFO
+    assert abc.getEffectiveLevel() == logging.INFO
+
+    manager.set_logger_levels('a.b.*', logging.WARNING)
+    assert a.getEffectiveLevel() == logging.INFO
+    assert ab.getEffectiveLevel() == logging.WARNING
+    assert abc.getEffectiveLevel() == logging.WARNING
+
+    manager.set_logger_levels('a.b.c.*', logging.ERROR)
+    assert a.getEffectiveLevel() == logging.INFO
+    assert ab.getEffectiveLevel() == logging.WARNING
+    assert abc.getEffectiveLevel() == logging.ERROR
+
+    manager.set_logger_levels('a.b.c', logging.CRITICAL)
+    assert a.getEffectiveLevel() == logging.INFO
+    assert ab.getEffectiveLevel() == logging.WARNING
+    assert abc.getEffectiveLevel() == logging.CRITICAL
+
+    manager.set_logger_levels('a.b', logging.DEBUG)
+    assert a.getEffectiveLevel() == logging.INFO
+    assert ab.getEffectiveLevel() == logging.DEBUG
+    assert abc.getEffectiveLevel() == logging.CRITICAL
+
+    manager.set_logger_levels('a', logging.TRACE)
+    assert a.getEffectiveLevel() == logging.TRACE
+    assert ab.getEffectiveLevel() == logging.DEBUG
+    assert abc.getEffectiveLevel() == logging.CRITICAL
+
