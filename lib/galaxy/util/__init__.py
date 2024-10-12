@@ -2,6 +2,7 @@
 Utility functions used systemwide.
 
 """
+import logging
 
 import binascii
 import codecs
@@ -10,6 +11,7 @@ import errno
 import importlib
 import itertools
 import json
+import logging
 import os
 import random
 import re
@@ -124,7 +126,7 @@ except ImportError:
     )
 
 from . import requests
-from .custom_logging import get_logger
+# from .custom_logging import get_logger
 from .inflection import Inflector
 from .path import (  # noqa: F401
     safe_contains,
@@ -144,7 +146,9 @@ except AttributeError:
 
 inflector = Inflector()
 
-log = get_logger(__name__)
+# log = get_logger(__name__)
+log = logging.getLogger(__name__)
+
 _lock = threading.RLock()
 
 namedtuple = collections.namedtuple
@@ -1721,10 +1725,22 @@ def move_merge(source, target):
     # if the target doesn't exist, then the target is made into the directory
     # this makes it so that the target is always the target, and if it exists,
     # the source contents are moved into the target
+    log.trace("Attempting to move %s to %s", source, target)
     if os.path.isdir(source) and os.path.exists(target) and os.path.isdir(target):
         for name in os.listdir(source):
             move_merge(os.path.join(source, name), os.path.join(target, name))
     else:
+        if not os.path.exists(source):
+            log.error("Source does not exist: %s", source)
+            return target
+        log.info("Moving %s to %s", source, target)
+        path = Path(source)
+        log.debug("Source: %s %s:%s %s", source, path.owner(), path.group(), oct(path.stat().st_mode))
+        #log.info(f"Source: {source} {path.owner()}:{path.group()} {oct(path.stat().st_mode)}")
+        path = Path(target).parent
+        log.debug("Target: %s %s:%s %s", source, path.owner(), path.group(), oct(path.stat().st_mode))
+        #log.info(f"Target: {target} {path.owner()}:{path.group()} {oct(path.stat().st_mode)}")
+        log.info("Actual User: %s", os.getuid())
         return shutil.move(source, target)
 
 

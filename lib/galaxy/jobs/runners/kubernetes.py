@@ -66,6 +66,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
     LABEL_REGEX = re.compile("[^-A-Za-z0-9_.]")
 
     def __init__(self, app, nworkers, **kwargs):
+        log.setLevel(logging.TRACE)
         log.trace("Initializing KubernetesJobRunner")
         # Check if pykube was importable, fail if not
         ensure_pykube()
@@ -137,6 +138,7 @@ class KubernetesJobRunner(AsynchronousJobRunner):
             return [{"name": pvc["name"], "persistentVolumeClaim": {"claimName": pvc["name"]}} for pvc in pvc_list]
 
         def get_volume_mounts_for(claim):
+            global log
             log.trace("Getting volume mounts for %s", claim)
             if self.runner_params.get(claim):
                 volume_mounts = [parse_pvc_param_line(pvc) for pvc in self.runner_params[claim].split(",")]
