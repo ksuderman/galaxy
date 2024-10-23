@@ -1738,7 +1738,10 @@ def move_merge(source, target):
         log.debug("Source: %s %s:%s %s", source, path.owner(), path.group(), oct(path.stat().st_mode))
         #log.info(f"Source: {source} {path.owner()}:{path.group()} {oct(path.stat().st_mode)}")
         path = Path(target).parent
-        log.debug("Target: %s %s:%s %s", source, path.owner(), path.group(), oct(path.stat().st_mode))
+        if os.path.exists(path):
+            log.debug("Target: %s %s:%s %s", source, path.owner(), path.group(), oct(path.stat().st_mode))
+        else:
+            log.debug("Target %s does not exist.", path)
         #log.info(f"Target: {target} {path.owner()}:{path.group()} {oct(path.stat().st_mode)}")
         log.info("Actual User: %s", os.getuid())
         return shutil.move(source, target)
