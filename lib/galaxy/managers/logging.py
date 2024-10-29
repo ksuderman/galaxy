@@ -1,8 +1,9 @@
+import os
 import os.path
-import re
 import logging
+import time
+import threading
 from typing import Dict, List
-from watchdog.observers import Observer
 from galaxy.exceptions import AdminRequiredException
 from galaxy.managers.context import ProvidesUserContext
 
@@ -37,10 +38,6 @@ class LoggerLevelInfo(BaseModel):
         description="The effective level of the logger."
     )
 
-
-import os
-import time
-import threading
 
 
 # Function to check the modification times of the files in a directory
@@ -91,7 +88,7 @@ import threading
 
 
 class LoggingWatcher:
-    def __init__(self, directory, f, interval=1):
+    def __init__(self, directory, f, interval=10):
         self.directory = directory
         self.times = dict()
         self.handler = f
@@ -146,26 +143,21 @@ class LoggingManager:
     def __init__(self):
         log.info("Initializing LoggingManager")
         # Delete all files in the WATCH_DIR
-        if os.path.exists(WATCH_DIR):
-            log.debug("Clearing watch directory: %s", WATCH_DIR)
-            for f in os.listdir(WATCH_DIR):
-                os.remove(os.path.join(WATCH_DIR, f))
-        else:
+        if not os.path.exists(WATCH_DIR):
             try:
                 os.makedirs(WATCH_DIR)
                 log.debug("Created watch directory: %s", WATCH_DIR)
             except OSError as e:
                 log.error("Unable to create watch directory: %s", e)
-                log.warning("Setting log levels will not be possible.")
+                log.warning("Changing log levels will not be possible.")
                 return
-
-        # Save all logger levels to the WATCH_DIR using the logger name as the
-        # file name.
-        log.debug("Saving current logging levels")
-        for name in logging.Logger.manager.loggerDict:
-            if isinstance(logging.Logger.manager.loggerDict[name], logging.Logger):
-                with open(os.path.join(WATCH_DIR, name), 'w') as f:
-                    f.write(logging.getLevelName(logging.getLogger(name).level))
+            # Save all logger levels to the WATCH_DIR using the logger name as the
+            # file name.  (Why?
+            # log.debug("Saving current logging levels")
+            # for name in logging.Logger.manager.loggerDict:
+            #     if isinstance(logging.Logger.manager.loggerDict[name], logging.Logger):
+            #         with open(os.path.join(WATCH_DIR, name), 'w') as f:
+            #             f.write(logging.getLevelName(logging.getLogger(name).level))
 
         # Now watch the directory for changes made by the API handler.
         log.debug("Configuring a directory watcher.")
@@ -177,6 +169,7 @@ class LoggingManager:
             logging.getLogger(name).setLevel(new_level)
             log.info("Set level for %s to %s", name, new_level)
 
+        ## For some reason the Watcher class causes Python to seg fault on my machine.
         # self.watcher = Watcher(Observer, LoggingWatcherEventHandler)
         # self.watcher.watch_directory(WATCH_DIR)
         # self.watcher.start()
@@ -327,3 +320,10 @@ class LoggingManager:
         log.error("ERROR message")
         log.critical("CRITICAL message")
         return "Test OK"
+
+_instance = LoggingManager()
+
+def instance():
+    return _instance
+
+
