@@ -8,13 +8,26 @@ def addTraceLoggingLevel():
     addLoggingLevel('TRACE', TRACE)
 
 
-def setLevels(configuration:dict) -> None:
-    for name in configuration:
-        level = configuration[name]
+def set_levels(configuration: dict):
+    all_logger_names = python_logging.Logger.manager.loggerDict.keys()
+    settings = dict()
+    for name,level in configuration.items():
+        if type(level) == int:
+            level = python_logging.getLevelName(level)
+        else:
+            level = level.upper()
+        if name.endswith(".*"):
+            pattern = name[:-2]
+            for name in all_logger_names:
+                if name.startswith(pattern):
+                    settings[name] = level
+        else:
+            settings[name] = level
+    for name,level in settings.items():
         python_logging.getLogger(name).setLevel(level)
 
 def setAllLoggersTo(level:str) -> None:
-    setLevels({name: level for name in python_logging.Logger.manager.loggerDict})
+    set_levels({name: level for name in python_logging.Logger.manager.loggerDict})
 
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
@@ -92,7 +105,3 @@ class DebuggingLogHander(python_logging.Handler):
 
     def get_records(self):
         return self.records
-
-
-
-# addTraceLoggingLevel()

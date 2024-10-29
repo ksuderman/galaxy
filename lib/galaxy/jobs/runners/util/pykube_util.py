@@ -32,6 +32,7 @@ except ImportError as exc:
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.TRACE)
+log.info("Createdd logger for %s", __name__)
 
 DEFAULT_JOB_API_VERSION = "batch/v1"
 DEFAULT_SERVICE_API_VERSION = "v1"

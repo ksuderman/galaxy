@@ -34,6 +34,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+import galaxy.util.logging
 from galaxy.config.schema import AppSchema
 from galaxy.exceptions import ConfigurationError
 from galaxy.util import (
@@ -46,6 +47,8 @@ from galaxy.util.config_parsers import parse_allowlist_ips
 from galaxy.util.custom_logging import LOGLV_TRACE
 from galaxy.util.dynamic import HasDynamicProperties
 from galaxy.util.facts import get_facts
+from galaxy.util.logging import set_levels
+
 from galaxy.util.properties import (
     read_properties_from_file,
     running_from_source,
@@ -191,6 +194,9 @@ def configure_logging(config, facts=None):
                 conf["filename"] = conf.pop("filename_template").format(**facts)
                 logging_conf["handlers"][name] = conf
         logging.config.dictConfig(logging_conf)
+    logging_levels = config.get("logging_levels", None)
+    if logging_levels:
+        set_levels(logging_levels)
 
 
 def find_root(kwargs) -> str:

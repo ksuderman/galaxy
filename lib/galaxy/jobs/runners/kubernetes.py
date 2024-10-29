@@ -49,7 +49,7 @@ from galaxy.util import unicodify
 from galaxy.util.bytesize import ByteSize
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.TRACE)
+# log.setLevel(logging.TRACE)
 
 __all__ = ("KubernetesJobRunner",)
 
@@ -797,7 +797,8 @@ class KubernetesJobRunner(AsynchronousJobRunner):
             # as probably this means that the k8s API server hasn't
             # had time to fill in the object status since the
             # job was created only too recently.
-            if len(job.obj["status"]) == 0:
+            #if len(job.obj["status"]) == 0:
+            if len(job.obj["status"]) == 0 or 'uncountedTerminatedPods' in job.obj["status"]:
                 return job_state
             if "succeeded" in job.obj["status"]:
                 succeeded = job.obj["status"]["succeeded"]

@@ -1,8 +1,8 @@
 import logging
-from galaxy.util.logging import setLevels, setAllLoggersTo, DebuggingLogHander
+from galaxy.util.logging import set_levels, setAllLoggersTo, DebuggingLogHander
 
 setAllLoggersTo(logging.ERROR)
-setLevels({
+set_levels({
     'galaxy.datatypes.display_applications.application': logging.CRITICAL,
     'galaxy.managers.logging': logging.TRACE,
     'galaxy.api.logging': logging.TRACE,
