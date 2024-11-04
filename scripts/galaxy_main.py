@@ -34,8 +34,6 @@ except ImportError:
 
 from galaxy.util.logging import addTraceLoggingLevel
 addTraceLoggingLevel()
-import galaxy.managers.logging
-manager = galaxy.managers.logging.instance()
 
 log = logging.getLogger(__name__)
 
