@@ -32,7 +32,7 @@ class FastApiLoggingManager:
         return self.manager.get_logger_levels(trans)
 
     @router.get(
-        "/api/logging/config/{logger_name}",
+        "/api/logging/{logger_name}",
         summary="Get the level of a logger",
         response_description="The level of the logger",
     )
@@ -41,7 +41,7 @@ class FastApiLoggingManager:
         return self.manager.get_logger_level(logger_name, trans)
 
     @router.post(
-        "/api/logging/config/{logger_name}", summary="Set the level of a logger"
+        "/api/logging/{logger_name}", summary="Set the level of a logger"
     )  # , response_class=LoggerLevelInfo, response_description='The level of the logger')
     def set(self, logger_name, level, trans: ProvidesUserContext = DependsOnTrans):
         log.info("Setting log level for %s to %s", logger_name, level)
@@ -49,6 +49,6 @@ class FastApiLoggingManager:
             return self.manager.set_logger_levels(logger_name, level, trans)
         return self.manager.set_logger_level(logger_name, level, trans)
 
-    @router.get("/api/logging/test", summary="Test the logging API")
-    def test(self, trans: ProvidesUserContext = DependsOnTrans):
-        return self.manager.test(trans)
+    # @router.get("/api/logging/test", summary="Test the logging API")
+    # def test(self, trans: ProvidesUserContext = DependsOnTrans):
+    #     return self.manager.test(trans)

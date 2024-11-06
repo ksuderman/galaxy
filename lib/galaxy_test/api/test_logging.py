@@ -58,14 +58,14 @@ class TestLoggingApi(ApiTestCase):
 
     def test_get(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
-        response = self._get("logging/config/test")
+        response = self._get("logging/test")
         response.raise_for_status()
         logger_level = response.json()
         assert logger_level["name"] == "test"
         assert logger_level["level"] == "DEBUG"
         assert logger_level["effective"] == "DEBUG"
 
-        response = self._get("logging/config/galaxy.managers.logging")
+        response = self._get("logging/galaxy.managers.logging")
         response.raise_for_status()
         logger_level = response.json()
         assert logger_level["name"] == "galaxy.managers.logging"
@@ -74,7 +74,7 @@ class TestLoggingApi(ApiTestCase):
 
     def test_set(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
-        response = self._post("logging/config/test?level=CRITICAL") #, data={"level": "CRITICAL"})
+        response = self._post("logging/test?level=CRITICAL") #, data={"level": "CRITICAL"})
         response.raise_for_status()
         logger_level = response.json()
         assert  logger_level["name"] == "test"
@@ -108,7 +108,7 @@ class TestLoggingApi(ApiTestCase):
         assert records[1].levelname == "INFO"
         handler.reset()
 
-        response = self._post("logging/config/test?level=INFO")
+        response = self._post("logging/test?level=INFO")
         response.raise_for_status()
         logger_level = response.json()
         assert logger_level["name"] == "test"
@@ -122,7 +122,7 @@ class TestLoggingApi(ApiTestCase):
         assert records[0].levelname == "INFO"
         handler.reset()
 
-        response = self._post("logging/config/test?level=ERROR")
+        response = self._post("logging/test?level=ERROR")
         response.raise_for_status()
         logger_level = response.json()
         assert logger_level["name"] == "test"

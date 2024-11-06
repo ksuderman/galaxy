@@ -142,7 +142,6 @@ class LoggingManager:
 
     def __init__(self):
         log.info("Initializing LoggingManager")
-        # Delete all files in the WATCH_DIR
         if not os.path.exists(WATCH_DIR):
             try:
                 os.makedirs(WATCH_DIR)
@@ -151,14 +150,6 @@ class LoggingManager:
                 log.error("Unable to create watch directory: %s", e)
                 log.warning("Changing log levels will not be possible.")
                 return
-            # Save all logger levels to the WATCH_DIR using the logger name as the
-            # file name.  (Why?
-            # log.debug("Saving current logging levels")
-            # for name in logging.Logger.manager.loggerDict:
-            #     if isinstance(logging.Logger.manager.loggerDict[name], logging.Logger):
-            #         with open(os.path.join(WATCH_DIR, name), 'w') as f:
-            #             f.write(logging.getLevelName(logging.getLogger(name).level))
-
         # Now watch the directory for changes made by the API handler.
         log.debug("Configuring a directory watcher.")
         def file_changed(filepath):
