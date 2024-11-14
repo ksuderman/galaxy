@@ -71,7 +71,7 @@ from galaxy.managers.interactivetool import InteractiveToolManager
 from galaxy.managers.jobs import JobSearch
 from galaxy.managers.libraries import LibraryManager
 from galaxy.managers.library_datasets import LibraryDatasetsManager
-from galaxy.managers.logging import LoggingManager
+# from galaxy.managers.logging import LoggingManager
 from galaxy.managers.notification import NotificationManager
 from galaxy.managers.object_store_instances import UserObjectStoreResolverImpl
 from galaxy.managers.roles import RoleManager
@@ -631,7 +631,7 @@ class GalaxyManagerApplication(MinimalManagerApp, MinimalGalaxyApplication, Inst
         self.role_manager = self._register_singleton(RoleManager)
         self.job_manager = self._register_singleton(JobManager)
         self.notification_manager = self._register_singleton(NotificationManager)
-        self.logging_manager = self._register_singleton(LoggingManager)
+        # self.logging_manager = self._register_singleton(LoggingManager)
         self.task_manager = self._register_abstract_singleton(
             AsyncTasksManager, CeleryAsyncTasksManager  # type: ignore[type-abstract]  # https://github.com/python/mypy/issues/4717
         )

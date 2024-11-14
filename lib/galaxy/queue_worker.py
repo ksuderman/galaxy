@@ -299,6 +299,14 @@ def admin_job_lock(app, **kwargs):
     log.info(f"Administrative Job Lock is now set to {job_lock}. Jobs will {'not' if job_lock else 'now'} dispatch.")
 
 
+def set_log_level(app, **kwargs):
+    name = kwargs.get("name")
+    level = kwargs.get("level")
+    log.info("Setting log level for logger %s to %s", name, level)
+    from galaxy.managers.logging import LoggingManager
+    LoggingManager().set_log_level(name=name, level=level)
+
+
 control_message_to_task = {
     "create_panel_section": create_panel_section,
     "reload_tool": reload_tool,
@@ -314,6 +322,7 @@ control_message_to_task = {
     "reconfigure_watcher": reconfigure_watcher,
     "reload_tour": reload_tour,
     "reload_core_config": reload_core_config,
+    "set_log_level": set_log_level,
 }
 
 

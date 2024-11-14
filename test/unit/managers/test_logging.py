@@ -64,7 +64,7 @@ def test_logging_manager_index():
 def test_get_logging_levels():
     logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
     manager = LoggingManager()
-    levels = manager.get_logger_levels()
+    levels = manager.get_log_levels()
     assert 'test' in levels
     assert levels['test'].level == 'WARNING'
     assert levels['test'].effective == 'WARNING'
@@ -76,10 +76,10 @@ def test_get_logging_levels():
 def test_get_logging_level():
     logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
     manager = LoggingManager()
-    logger = manager.get_logger_level('test')
+    logger = manager.get_log_level('test')
     assert logger.level == 'WARNING'
     assert logger.effective == 'WARNING'
-    logger = manager.get_logger_level('galaxy.managers.logging')
+    logger = manager.get_log_level('galaxy.managers.logging')
     assert logger.level == 'NOTSET'
     assert logger.effective == 'DEBUG'
 
@@ -89,9 +89,9 @@ def test_set_level():
     manager = LoggingManager()
     loggers = manager.index()
     assert 'test' in loggers
-    assert manager.get_logger_level('test').level == 'WARNING'
-    manager.set_logger_level('test', 'DEBUG')
-    assert manager.get_logger_level('test').level == 'DEBUG'
+    assert manager.get_log_level('test').level == 'WARNING'
+    manager.set_log_level('test', 'DEBUG')
+    assert manager.get_log_level('test').level == 'DEBUG'
 
     # assert manager.get_logger_level('test').level == 'WARNING'
     # assert manager.get_logger_level('test').level == 'WARNING'
@@ -112,32 +112,32 @@ def test_set_levels():
     assert ab.getEffectiveLevel() == logging.DEBUG
     assert abc.getEffectiveLevel() == logging.DEBUG
 
-    manager.set_logger_levels('a.*', 'INFO')
+    manager.set_log_level('a.*', 'INFO')
     assert a.getEffectiveLevel() == logging.INFO
     assert ab.getEffectiveLevel() == logging.INFO
     assert abc.getEffectiveLevel() == logging.INFO
 
-    manager.set_logger_levels('a.b.*', logging.WARNING)
+    manager.set_log_level('a.b.*', logging.WARNING)
     assert a.getEffectiveLevel() == logging.INFO
     assert ab.getEffectiveLevel() == logging.WARNING
     assert abc.getEffectiveLevel() == logging.WARNING
 
-    manager.set_logger_levels('a.b.c.*', logging.ERROR)
+    manager.set_log_level('a.b.c.*', logging.ERROR)
     assert a.getEffectiveLevel() == logging.INFO
     assert ab.getEffectiveLevel() == logging.WARNING
     assert abc.getEffectiveLevel() == logging.ERROR
 
-    manager.set_logger_levels('a.b.c', logging.CRITICAL)
+    manager.set_log_level('a.b.c', logging.CRITICAL)
     assert a.getEffectiveLevel() == logging.INFO
     assert ab.getEffectiveLevel() == logging.WARNING
     assert abc.getEffectiveLevel() == logging.CRITICAL
 
-    manager.set_logger_levels('a.b', logging.DEBUG)
+    manager.set_log_level('a.b', logging.DEBUG)
     assert a.getEffectiveLevel() == logging.INFO
     assert ab.getEffectiveLevel() == logging.DEBUG
     assert abc.getEffectiveLevel() == logging.CRITICAL
 
-    manager.set_logger_levels('a', logging.TRACE)
+    manager.set_log_level('a', logging.TRACE)
     assert a.getEffectiveLevel() == logging.TRACE
     assert ab.getEffectiveLevel() == logging.DEBUG
     assert abc.getEffectiveLevel() == logging.CRITICAL
