@@ -27,6 +27,7 @@ from galaxy.model import User
 from galaxy.tools import ToolBox
 from galaxy.tools.data_manager.manager import DataManagers
 from galaxy.tools.special_tools import load_lib_tools
+from galaxy.util.logging.methods import set_log_levels
 
 logging.getLogger("kombu").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
@@ -303,8 +304,7 @@ def set_log_level(app, **kwargs):
     name = kwargs.get("name")
     level = kwargs.get("level")
     log.info("Setting log level for logger %s to %s", name, level)
-    from galaxy.managers.logging import LoggingManager
-    LoggingManager().set_log_level(name=name, level=level)
+    set_log_levels(name=name, level=level)
 
 
 control_message_to_task = {

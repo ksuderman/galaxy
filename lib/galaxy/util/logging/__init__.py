@@ -3,7 +3,6 @@ import logging as python_logging
 
 TRACE = python_logging.DEBUG - 5
 
-
 def addTraceLoggingLevel():
     addLoggingLevel('TRACE', TRACE)
 

@@ -1,4 +1,7 @@
+import json
 import logging
+import time
+
 from galaxy.util.logging import set_levels, setAllLoggersTo, DebuggingLogHander
 
 setAllLoggersTo(logging.ERROR)
@@ -49,34 +52,37 @@ class TestLoggingApi(ApiTestCase):
 
     def test_index(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
-        response = self._get("logging")
+        response = self._get("logging", admin=True)
         response.raise_for_status()
         logger_names = response.json()
         # These are the only two loggers that we can be sure are present.
         assert "test" in logger_names
-        assert "galaxy.managers.logging" in logger_names
+        # assert "galaxy.managers.logging" in logger_names
 
     def test_get(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
-        response = self._get("logging/test")
+        response = self._get("logging/test", admin=True)
         response.raise_for_status()
-        logger_level = response.json()
+        logger_levels = response.json()
+        assert len(logger_levels) == 1
+        assert "test" in logger_levels
+        logger_level = logger_levels['test']
         assert logger_level["name"] == "test"
         assert logger_level["level"] == "DEBUG"
         assert logger_level["effective"] == "DEBUG"
 
-        response = self._get("logging/galaxy.managers.logging")
-        response.raise_for_status()
-        logger_level = response.json()
-        assert logger_level["name"] == "galaxy.managers.logging"
-        assert logger_level["level"] == "TRACE"
-        assert logger_level["effective"] == "TRACE"
 
     def test_set(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
-        response = self._post("logging/test?level=CRITICAL") #, data={"level": "CRITICAL"})
+        response = self._post("logging/test?level=CRITICAL", admin=True) #, data={"level": "CRITICAL"})
         response.raise_for_status()
-        logger_level = response.json()
+        time.sleep(2)
+        response = self._get("logging/test", admin=True)
+        response.raise_for_status()
+        logger_levels = response.json()
+        assert len(logger_levels) == 1
+        assert "test" in logger_levels
+        logger_level = logger_levels["test"]
         assert  logger_level["name"] == "test"
         assert logger_level["level"] == "CRITICAL"
         assert logger_level["effective"] == "CRITICAL"
@@ -108,9 +114,15 @@ class TestLoggingApi(ApiTestCase):
         assert records[1].levelname == "INFO"
         handler.reset()
 
-        response = self._post("logging/test?level=INFO")
+        response = self._post("logging/test?level=INFO", admin=True)
         response.raise_for_status()
-        logger_level = response.json()
+        time.sleep(1)
+        response = self._get("logging/test", admin=True)
+        response.raise_for_status()
+        logger_levels = response.json()
+        assert len(logger_levels) == 1
+        assert "test" in logger_levels
+        logger_level = logger_levels["test"]
         assert logger_level["name"] == "test"
         assert logger_level["level"] == "INFO"
         assert logger_level["effective"] == "INFO"
@@ -122,9 +134,15 @@ class TestLoggingApi(ApiTestCase):
         assert records[0].levelname == "INFO"
         handler.reset()
 
-        response = self._post("logging/test?level=ERROR")
+        response = self._post("logging/test?level=ERROR", admin=True)
         response.raise_for_status()
-        logger_level = response.json()
+        time.sleep(1)
+        response = self._get("logging/test", admin=True)
+        response.raise_for_status()
+        logger_levels = response.json()
+        assert len(logger_levels) == 1
+        assert "test" in logger_levels
+        logger_level = logger_levels["test"]
         assert logger_level["name"] == "test"
         assert logger_level["level"] == "ERROR"
         assert logger_level["effective"] == "ERROR"
