@@ -34,7 +34,6 @@ from urllib.parse import urlparse
 
 import yaml
 
-import galaxy.util.logging
 from galaxy.config.schema import AppSchema
 from galaxy.exceptions import ConfigurationError
 from galaxy.util import (
@@ -162,9 +161,6 @@ def configure_logging(config, facts=None):
     or a simple dictionary of configuration variables.
     """
     facts = facts or get_facts(config=config)
-    # Get root logger
-    # TODO: remove this line.
-    # logging.addLevelName(LOGLV_TRACE, "TRACE")
 
     # PasteScript will have already configured the logger if the
     # 'loggers' section was found in the config file, otherwise we do

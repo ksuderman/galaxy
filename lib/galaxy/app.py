@@ -71,7 +71,6 @@ from galaxy.managers.interactivetool import InteractiveToolManager
 from galaxy.managers.jobs import JobSearch
 from galaxy.managers.libraries import LibraryManager
 from galaxy.managers.library_datasets import LibraryDatasetsManager
-# from galaxy.managers.logging import LoggingManager
 from galaxy.managers.notification import NotificationManager
 from galaxy.managers.object_store_instances import UserObjectStoreResolverImpl
 from galaxy.managers.roles import RoleManager
@@ -222,15 +221,12 @@ class SentryClientMixin:
         self.sentry_client = None
         if self.config.sentry_dsn:
             event_level = self.config.sentry_event_level.upper()
-            assert event_level in [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR",
-                "CRITICAL",
-            ], f"Invalid sentry event level '{self.config.sentry.event_level}'"
+            # assert event_level in logging._levelToName.values(), f"Invalid sentry event level '{self.config.sentry.event_level}'"
+            if not event_level in logging._levelToName.values():
+                log.warning("Invalid sentry event level %s", self.config.sentry_event_level)
+                event_level = "ERROR"
 
-            import sentry_sdkgb
+            import sentry_sdk
             from sentry_sdk.integrations.logging import LoggingIntegration
 
             sentry_logging = LoggingIntegration(

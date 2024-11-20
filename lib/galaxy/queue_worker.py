@@ -301,10 +301,14 @@ def admin_job_lock(app, **kwargs):
 
 
 def set_log_level(app, **kwargs):
-    name = kwargs.get("name")
-    level = kwargs.get("level")
-    log.info("Setting log level for logger %s to %s", name, level)
-    set_log_levels(name=name, level=level)
+    try:
+        name = kwargs.get("name")
+        level = kwargs.get("level")
+        log.info("Setting log level for logger %s to %s", name, level)
+        set_log_levels(name=name, level=level)
+    except:
+        return False
+    return True
 
 
 control_message_to_task = {

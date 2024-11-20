@@ -21,8 +21,10 @@ ARG SERVER_DIR=$ROOT_DIR/server
 ARG STAGE1_BASE=python:3.12-slim
 ARG FINAL_STAGE_BASE=$STAGE1_BASE
 ARG GALAXY_USER=galaxy
-ARG GALAXY_PLAYBOOK_REPO=https://github.com/galaxyproject/galaxy-docker-k8s
-ARG GALAXY_PLAYBOOK_BRANCH=v4.1.0
+#ARG GALAXY_PLAYBOOK_REPO=https://github.com/galaxyproject/galaxy-docker-k8s
+#ARG GALAXY_PLAYBOOK_BRANCH=v4.1.0
+ARG GALAXY_PLAYBOOK_REPO=https://github.com/ksuderman/galaxy-docker-k8s
+ARG GALAXY_PLAYBOOK_BRANCH=v4.2.0
 
 ARG GIT_COMMIT=unspecified
 ARG BUILD_DATE=unspecified
@@ -58,7 +60,7 @@ RUN set -xe; \
 # Remove context from previous build; copy current context; run playbook
 WORKDIR /tmp/ansible
 RUN rm -rf *
-ENV LC_ALL en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
 RUN git clone --depth 1 --branch $GALAXY_PLAYBOOK_BRANCH $GALAXY_PLAYBOOK_REPO galaxy-docker
 WORKDIR /tmp/ansible/galaxy-docker
 RUN ansible-galaxy install -r requirements.yml -p roles --force-with-deps
@@ -86,6 +88,7 @@ RUN rm -rf \
         doc \
         test \
         test-data
+
 # Clean up *all* node_modules, including plugins.  Everything is already built+staged.
 RUN find . -name "node_modules" -type d -prune -exec rm -rf '{}' +
 
@@ -193,4 +196,4 @@ ENV GALAXY_CONFIG_CONDA_AUTO_INIT=False
 ENTRYPOINT ["tini", "--"]
 
 # [optional] to run:
-CMD galaxy
+CMD ["galaxy"]

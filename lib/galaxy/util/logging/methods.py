@@ -48,7 +48,7 @@ def get_logger_names() -> List[str]:
 def get_log_levels(name) -> Dict[str, Dict[str, str]]:
     '''
     Get the log level for a one or more loggers. If no name is provided then
-    the level for all loggers is returned.
+    the levels for all loggers is returned.
 
     :param name: The name of the logger to get the level for
     :type name: str
