@@ -1,19 +1,13 @@
-import json
 import logging
-import time
 
 from galaxy.util.logging import set_levels, setAllLoggersTo, DebuggingLogHander
 
 setAllLoggersTo(logging.ERROR)
 set_levels({
     'galaxy.datatypes.display_applications.application': logging.CRITICAL,
-    'galaxy.managers.logging': logging.TRACE,
-    'galaxy.api.logging': logging.TRACE,
+    'galaxy.api.logging.*': logging.TRACE,
     'galaxy_test.api.test_logging': logging.TRACE
 })
-
-log = logging.getLogger(__name__)
-log.trace("Setting the log level to TRACE for %s", __name__)
 
 from ._framework import ApiTestCase
 
@@ -55,9 +49,9 @@ class TestLoggingApi(ApiTestCase):
         response = self._get("logging", admin=True)
         response.raise_for_status()
         logger_names = response.json()
-        # These are the only two loggers that we can be sure are present.
+        # These are the only loggers that we can be sure are present.
         assert "test" in logger_names
-        # assert "galaxy.managers.logging" in logger_names
+
 
     def test_get(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
@@ -75,8 +69,8 @@ class TestLoggingApi(ApiTestCase):
     def test_set(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
         response = self._post("logging/test?level=CRITICAL", admin=True) #, data={"level": "CRITICAL"})
+        print(response.text)
         response.raise_for_status()
-        time.sleep(2)
         response = self._get("logging/test", admin=True)
         response.raise_for_status()
         logger_levels = response.json()
@@ -116,7 +110,6 @@ class TestLoggingApi(ApiTestCase):
 
         response = self._post("logging/test?level=INFO", admin=True)
         response.raise_for_status()
-        time.sleep(1)
         response = self._get("logging/test", admin=True)
         response.raise_for_status()
         logger_levels = response.json()
@@ -136,7 +129,6 @@ class TestLoggingApi(ApiTestCase):
 
         response = self._post("logging/test?level=ERROR", admin=True)
         response.raise_for_status()
-        time.sleep(1)
         response = self._get("logging/test", admin=True)
         response.raise_for_status()
         logger_levels = response.json()
