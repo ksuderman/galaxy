@@ -1,5 +1,6 @@
 import importlib
 import logging
+import traceback
 from inspect import getfullargspec
 from types import ModuleType
 from typing import (
@@ -270,11 +271,14 @@ class JobRunnerMapper:
             )
         except (JobMappingConfigurationException, JobMappingException, JobNotReadyException):
             raise
-        except Exception:
+        except Exception as e:
             # Other exceptions should not bubble up to the job wrapper since they can occur during the fail() method,
             # causing jobs to become permanently stuck in a non-terminal state.
-            log.exception("Caught unhandled exception while attempting to cache job destination:")
+            log.exception("Caught unhandled exception %s while attempting to cache job destination:", type(e).__name__)
+            log.exception(e)
+            log.error(traceback.format_exc(e))
             raise JobMappingException(ERROR_MESSAGE_RULE_EXCEPTION)
+            # raise
         return self.cached_job_destination
 
     def get_job_destination(self, params):
