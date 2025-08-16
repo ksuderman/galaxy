@@ -36,6 +36,12 @@ class GoogleBatchJobRunner(AsynchronousJobRunner):
 
     runner_name = "GoogleBatchJobRunner"
 
+    PULSAR_PARAM_SPECS = {
+        'pulsar_embedded_config': dict(map=dict, default={}),
+        'shared_storage': dict(map=dict, default={}),
+        'use_workload_identity': dict(map=specs.to_bool, default=False),
+    }
+
     def __init__(self, app, nworkers, **kwargs):
         """Initialize the Google Batch job runner."""
         super().__init__(app, nworkers, **kwargs)
