@@ -111,8 +111,8 @@ done
 # Create service account key
 print_header "\n=== Creating Service Account Key ==="
 KEY_FILE="galaxy-gcp-service-account.json"
-CREDENTIALS_DIR="/etc/galaxy/credentials"
-
+#CREDENTIALS_DIR="/etc/galaxy/credentials"
+CREDENTIALS_DIR="/Users/suderman/.secret"
 if [ -f "$KEY_FILE" ]; then
     print_warning "Key file $KEY_FILE already exists. Creating backup..."
     mv "$KEY_FILE" "${KEY_FILE}.backup.$(date +%Y%m%d-%H%M%S)"
@@ -134,7 +134,7 @@ fi
 
 print_status "Moving key to secure location..."
 sudo mv "$KEY_FILE" "$CREDENTIALS_DIR/"
-sudo chown root:root "${CREDENTIALS_DIR}/${KEY_FILE}"
+#sudo chown root:root "${CREDENTIALS_DIR}/${KEY_FILE}"
 sudo chmod 400 "${CREDENTIALS_DIR}/${KEY_FILE}"
 
 # Create GCS bucket
