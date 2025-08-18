@@ -11,6 +11,7 @@ from typing import Dict, Any
 
 from galaxy.jobs.runners import AsynchronousJobState, AsynchronousJobRunner
 from galaxy.jobs import JobDestination
+from galaxy.util import specs
 
 try:
     from google.cloud import batch_v1
@@ -44,16 +45,23 @@ class GoogleBatchJobRunner(AsynchronousJobRunner):
 
     def __init__(self, app, nworkers, **kwargs):
         """Initialize the Google Batch job runner."""
+        log.info("GoogleBatchJobRunner.__init__ - START")
+        log.info("GoogleBatchJobRunner.__init__ - nworkers: %s, kwargs keys: %s", nworkers, list(kwargs.keys()))
+        
         super().__init__(app, nworkers, **kwargs)
+        log.info("GoogleBatchJobRunner.__init__ - super().__init__ completed")
 
         # Check if Google Cloud libraries are available
         if batch_v1 is None:
+            log.error("GoogleBatchJobRunner.__init__ - google-cloud-batch library not available")
             raise Exception("google-cloud-batch library is required for GoogleBatchJobRunner")
 
         # Initialize Google Cloud Batch client
+        log.info("GoogleBatchJobRunner.__init__ - initializing batch client")
         self._init_batch_client()
 
         # Configuration
+        log.info("GoogleBatchJobRunner.__init__ - setting up configuration")
         self.default_project_id = self._get_project_id()
         self.default_region = self._get_config_value('region', 'us-central1')
         self.default_machine_type = self._get_config_value('machine_type', 'e2-standard-4')
@@ -63,41 +71,52 @@ class GoogleBatchJobRunner(AsynchronousJobRunner):
         # Job monitoring
         self._job_states = {}  # job_id -> batch job name mapping
 
-        log.info(f"GoogleBatchJobRunner initialized for project: {self.default_project_id}")
+        log.info("GoogleBatchJobRunner.__init__ - END - initialized for project: %s", self.default_project_id)
 
     def _init_batch_client(self):
         """Initialize the Google Cloud Batch client."""
+        log.info("GoogleBatchJobRunner._init_batch_client - START")
         try:
             credentials, project = default()
             self.batch_client = batch_v1.BatchServiceClient(credentials=credentials)
             self._project_from_auth = project
+            log.info("GoogleBatchJobRunner._init_batch_client - END - successfully initialized client for project: %s", project)
         except Exception as e:
-            log.error(f"Failed to initialize Google Cloud Batch client: {e}")
+            log.error("GoogleBatchJobRunner._init_batch_client - ERROR: Failed to initialize Google Cloud Batch client: %s", e)
             raise
 
     def _get_project_id(self):
         """Get the Google Cloud project ID."""
+        log.info("GoogleBatchJobRunner._get_project_id - START")
+        
         # Try from environment variable first
         project_id = os.environ.get('GOOGLE_CLOUD_PROJECT')
         if project_id:
+            log.info("GoogleBatchJobRunner._get_project_id - END - found project_id from environment: %s", project_id)
             return project_id
 
         # Try from auth
         if hasattr(self, '_project_from_auth') and self._project_from_auth:
+            log.info("GoogleBatchJobRunner._get_project_id - END - found project_id from auth: %s", self._project_from_auth)
             return self._project_from_auth
 
         # Try from config
         project_id = self._get_config_value('project_id')
         if project_id:
+            log.info("GoogleBatchJobRunner._get_project_id - END - found project_id from config: %s", project_id)
             return project_id
 
+        log.error("GoogleBatchJobRunner._get_project_id - ERROR - no project ID found")
         raise Exception(
             "Google Cloud project ID not found. Set GOOGLE_CLOUD_PROJECT environment variable or configure project_id.")
 
     def _get_config_value(self, key: str, default: str = None) -> str:
         """Get configuration value from Galaxy config."""
-        config_key = f'google_batch_{key}'
-        return getattr(self.app.config, config_key, default)
+        log.info("GoogleBatchJobRunner._get_config_value - getting config for key: %s", key)
+        config_key = 'google_batch_%s' % key
+        value = getattr(self.app.config, config_key, default)
+        log.info("GoogleBatchJobRunner._get_config_value - key: %s, value: %s", key, value)
+        return value
 
     def queue_job(self, job_wrapper):
         """Queue a job for execution on Google Batch."""

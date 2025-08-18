@@ -192,3 +192,6 @@ Galaxy uses YAML configuration files. Main config options:
 - Client build can be skipped during development with `GALAXY_SKIP_CLIENT_BUILD=1`
 - Database migrations should be handled carefully
 - Some areas still use legacy jQuery/Backbone alongside Vue.js
+- Always run Python code with the `python3` executable.
+- Logging statements should use `%` interpolation and not f-strings.
+- 

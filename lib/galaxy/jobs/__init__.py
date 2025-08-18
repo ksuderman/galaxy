@@ -864,77 +864,98 @@ class JobConfiguration(ConfiguresHandlers):
 
         :returns: list of job runner plugins
         """
+        log.info("JobConfiguration.get_job_runner_plugins - START - handler_id: %s", handler_id)
         rval: Dict[str, BaseJobRunner] = {}
         if handler_id in self.handler_runner_plugins:
             plugins_to_load = [rp for rp in self.runner_plugins if rp["id"] in self.handler_runner_plugins[handler_id]]
             log.info(
-                "Handler '%s' will load specified runner plugins: %s",
+                "JobConfiguration.get_job_runner_plugins - Handler '%s' will load specified runner plugins: %s",
                 handler_id,
                 ", ".join(rp["id"] for rp in plugins_to_load),
             )
         else:
             plugins_to_load = self.runner_plugins
-            log.info("Handler '%s' will load all configured runner plugins", handler_id)
+            log.info("JobConfiguration.get_job_runner_plugins - Handler '%s' will load all configured runner plugins", handler_id)
         for runner in plugins_to_load:
             class_names = []
             module = None
             id = runner["id"]
             load = runner["load"]
+            log.info("JobConfiguration.get_job_runner_plugins - processing runner id: %s, load: %s", id, load)
+            
             if ":" in load:
                 # Name to load was specified as '<module>:<class>'
                 module_name, class_name = load.rsplit(":", 1)
                 class_names = [class_name]
+                log.info("JobConfiguration.get_job_runner_plugins - importing module: %s, class: %s", module_name, class_name)
                 module = __import__(module_name)
             else:
                 # Name to load was specified as '<module>'
                 if "." not in load:
                     # For legacy reasons, try from galaxy.jobs.runners first if there's no '.' in the name
-                    module_name = f"galaxy.jobs.runners.{load}"
+                    module_name = "galaxy.jobs.runners.%s" % load
+                    log.info("JobConfiguration.get_job_runner_plugins - trying legacy import: %s", module_name)
                     try:
                         module = __import__(module_name)
                     except ImportError:
                         # No such module, we'll retry without prepending galaxy.jobs.runners.
                         # All other exceptions (e.g. something wrong with the module code) will raise
+                        log.info("JobConfiguration.get_job_runner_plugins - legacy import failed, will retry")
                         pass
                 if module is None:
                     # If the name included a '.' or loading from the static runners path failed, try the original name
+                    log.info("JobConfiguration.get_job_runner_plugins - importing module: %s", load)
                     module = __import__(load)
                     module_name = load
+            
             for comp in module_name.split(".")[1:]:
                 module = getattr(module, comp)
             assert module  # make mypy happy
+            
             if not class_names:
                 # If there's not a ':', we check <module>.__all__ for class names
                 try:
                     assert module.__all__
                     class_names = module.__all__
+                    log.info("JobConfiguration.get_job_runner_plugins - found class names from __all__: %s", class_names)
                 except AssertionError:
-                    log.error(f'Runner "{load}" does not contain a list of exported classes in __all__')
+                    log.error("JobConfiguration.get_job_runner_plugins - Runner '%s' does not contain a list of exported classes in __all__", load)
                     continue
+                    
             for class_name in class_names:
+                log.info("JobConfiguration.get_job_runner_plugins - processing class: %s", class_name)
                 runner_class = getattr(module, class_name)
                 try:
                     assert issubclass(runner_class, BaseJobRunner)
                 except TypeError:
-                    log.warning(f"A non-class name was found in __all__, ignoring: {id}")
+                    log.warning("JobConfiguration.get_job_runner_plugins - A non-class name was found in __all__, ignoring: %s", id)
                     continue
                 except AssertionError:
                     log.warning(
-                        f"Job runner classes must be subclassed from BaseJobRunner, {id} has bases: {runner_class.__bases__}"
+                        "JobConfiguration.get_job_runner_plugins - Job runner classes must be subclassed from BaseJobRunner, %s has bases: %s", id, runner_class.__bases__
                     )
                     continue
+                    
+                log.info("JobConfiguration.get_job_runner_plugins - instantiating runner class: %s", class_name)
+                log.info("JobConfiguration.get_job_runner_plugins - runner config: workers=%s, kwds=%s", runner.get("workers", JobConfiguration.DEFAULT_NWORKERS), runner.get("kwds", {}))
                 try:
                     rval[id] = runner_class(
                         self.app, runner.get("workers", JobConfiguration.DEFAULT_NWORKERS), **runner.get("kwds", {})
                     )
-                except TypeError:
+                    log.info("JobConfiguration.get_job_runner_plugins - successfully instantiated runner: %s", id)
+                except TypeError as e:
                     log.exception(
-                        "Job runner '%s:%s' has not been converted to a new-style runner or encountered TypeError on load",
+                        "JobConfiguration.get_job_runner_plugins - Job runner '%s:%s' has not been converted to a new-style runner or encountered TypeError on load: %s",
                         module_name,
                         class_name,
+                        e
                     )
+                    log.info("JobConfiguration.get_job_runner_plugins - trying fallback instantiation for: %s", id)
                     rval[id] = runner_class(self.app)
-                log.debug(f"Loaded job runner '{module_name}:{class_name}' as '{id}'")
+                    log.info("JobConfiguration.get_job_runner_plugins - fallback instantiation successful for: %s", id)
+                log.debug("JobConfiguration.get_job_runner_plugins - Loaded job runner '%s:%s' as '%s'", module_name, class_name, id)
+                
+        log.info("JobConfiguration.get_job_runner_plugins - END - loaded %s runners", len(rval))
         return rval
 
     def is_id(self, collection):
