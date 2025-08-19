@@ -11,6 +11,7 @@ import DisplayApplications from "components/admin/DisplayApplications";
 import ErrorStack from "components/admin/ErrorStack";
 import Home from "components/admin/Home";
 import JobsList from "components/admin/JobsList";
+import LoggingSettings from "components/admin/LoggingSettings";
 import BroadcastForm from "components/admin/Notifications/BroadcastForm";
 import NotificationForm from "components/admin/Notifications/NotificationForm";
 import NotificationsManagement from "components/admin/Notifications/NotificationsManagement";
@@ -61,6 +62,7 @@ export default [
                 },
             },
             { path: "jobs", component: JobsList },
+            { path: "logging", component: LoggingSettings },
             { path: "reset_metadata", component: ResetMetadata },
             { path: "sanitize_allow", component: SanitizeAllow },
             { path: "toolbox_dependencies", component: ToolboxDependencies },
