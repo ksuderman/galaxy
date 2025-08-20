@@ -105,7 +105,7 @@ def get_log_levels(name) -> Dict[str, Dict[str, str]]:
 
 def set_log_levels(name, level) -> List[Dict[str,str]]:
     '''
-    Set the log level for a one or more loggers.
+    Set the log level for one or more loggers.
 
     To set the level for a single logger, pass the name of the logger. To set
     the level for all loggers that start with a certain prefix, e.g. all the logger
