@@ -3,6 +3,7 @@
 
 import gzip
 import json
+import json_stream
 import logging
 import os
 import re
@@ -112,7 +113,7 @@ class Json(Text):
         if file_prefix.file_size < 50000 and not file_prefix.truncated:
             # If the file is small enough - don't guess just check.
             try:
-                item = json.loads(file_prefix.contents_header)
+                item = json_stream.loads(file_prefix.contents_header)
                 # exclude simple types, must set format in these cases
                 assert isinstance(item, (list, dict))
                 return True
@@ -143,7 +144,7 @@ class DataManagerJson(Json):
     def set_meta(self, dataset: DatasetProtocol, overwrite: bool = True, **kwd):
         super().set_meta(dataset=dataset, overwrite=overwrite, **kwd)
         with open(dataset.get_file_name()) as fh:
-            data_tables = json.load(fh)["data_tables"]
+            data_tables = json_stream.load(fh)["data_tables"]
         dataset.metadata.data_tables = data_tables
 
 
@@ -162,7 +163,7 @@ class ExpressionJson(Json):
             file_path = dataset.get_file_name()
             try:
                 with open(file_path) as f:
-                    obj = json.load(f)
+                    obj = json_stream.load(f)
                     if isinstance(obj, int):
                         json_type = "int"
                     elif isinstance(obj, float):
@@ -197,7 +198,7 @@ class Ipynb(Json):
         if self._looks_like_json(file_prefix):
             try:
                 with open(file_prefix.filename) as f:
-                    ipynb = json.load(f)
+                    ipynb = json_stream.load(f)
                 if ipynb.get("nbformat", False) is not False and ipynb.get("metadata", False):
                     return True
                 else:
@@ -440,7 +441,7 @@ class Biom1(Json):
         if dataset.has_data():
             with open(dataset.get_file_name()) as fh:
                 try:
-                    json_dict = json.load(fh)
+                    json_dict = json_stream.load(fh)
                 except Exception:
                     return
 
@@ -541,7 +542,7 @@ class ImgtJson(Json):
         if dataset.has_data():
             with open(dataset.get_file_name()) as fh:
                 try:
-                    json_dict = json.load(fh)
+                    json_dict = json_stream.load(fh)
                     tax_names = []
                     for entry in json_dict:
                         if "taxonId" in entry:
@@ -1161,7 +1162,7 @@ class BCSLts(Json):
     def set_peek(self, dataset: DatasetProtocol, **kwd) -> None:
         if not dataset.dataset.purged:
             lines = "States: {}\nTransitions: {}\nUnique agents: {}\nInitial state: {}"
-            ts = json.load(open(dataset.get_file_name()))
+            ts = json_stream.load(open(dataset.get_file_name()))
             dataset.peek = lines.format(len(ts["nodes"]), len(ts["edges"]), len(ts["ordering"]), ts["initial"])
             dataset.blurb = nice_size(dataset.get_size())
         else:
