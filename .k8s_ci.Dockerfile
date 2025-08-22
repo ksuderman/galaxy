@@ -21,6 +21,7 @@ ARG SERVER_DIR=$ROOT_DIR/server
 ARG STAGE1_BASE=python:3.12-slim
 ARG FINAL_STAGE_BASE=$STAGE1_BASE
 ARG GALAXY_USER=galaxy
+ARG GALAXY_UID=101
 ARG GALAXY_PLAYBOOK_REPO=https://github.com/galaxyproject/galaxy-docker-k8s
 ARG GALAXY_PLAYBOOK_BRANCH=v4.1.0
 
@@ -117,6 +118,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG ROOT_DIR
 ARG SERVER_DIR
 ARG GALAXY_USER
+ARG GALAXY_UID
 
 ARG GIT_COMMIT
 ARG BUILD_DATE
@@ -168,7 +170,7 @@ RUN set -xe; \
 
 # Create Galaxy user, group, directory; chown
 RUN set -xe; \
-      adduser --system --group --uid 101 $GALAXY_USER \
+      adduser --system --group --uid $GALAXY_UID $GALAXY_USER \
       && mkdir -p $SERVER_DIR \
       && chown $GALAXY_USER:$GALAXY_USER $ROOT_DIR -R
 
