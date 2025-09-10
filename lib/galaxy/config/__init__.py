@@ -1264,7 +1264,20 @@ class GalaxyAppConfiguration(BaseAppConfiguration, CommonConfigurationMixin):
             self.themes_by_host = {}
             resolve_to_dir = self.schema.paths_to_resolve["themes_config_file"]
             resolve_dir_path = getattr(self, resolve_to_dir)
-            for host, file_name in self.config_dict["themes_config_file_by_host"].items():
+            themes_by_host_config = self.config_dict["themes_config_file_by_host"]
+            
+            # Debug logging to identify the configuration issue
+            log.debug("DEBUG: themes_config_file_by_host found in config_dict")
+            log.debug("DEBUG: themes_config_file_by_host type: %s", type(themes_by_host_config))
+            log.debug("DEBUG: themes_config_file_by_host value: %r", themes_by_host_config)
+            
+            if not isinstance(themes_by_host_config, dict):
+                log.warning("themes_config_file_by_host should be a dictionary mapping hosts to theme files, got %s: %r", type(themes_by_host_config), themes_by_host_config)
+                log.warning("Ignoring themes_config_file_by_host and using default theme configuration")
+                _load_theme(self.themes_config_file, self.themes)
+                return
+                
+            for host, file_name in themes_by_host_config.items():
                 self.themes_by_host[host] = {}
                 file_path = self._in_dir(resolve_dir_path, file_name)
                 _load_theme(file_path, self.themes_by_host[host])

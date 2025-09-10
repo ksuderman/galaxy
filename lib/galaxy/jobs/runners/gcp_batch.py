@@ -54,6 +54,25 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "max_retry_count": dict(map=int, default=3),
             "max_run_duration": dict(map=str, default="3600s"),
             "polling_interval": dict(map=int, default=30),
+            # NFS volume configuration for data sharing
+            "nfs_server": dict(map=str, default=None),
+            "nfs_path": dict(map=str, default="/"),
+            "nfs_mount_path": dict(map=str, default="/mnt/nfs"),
+            # Network configuration for NFS access
+            "network": dict(map=str, default="default"),
+            "subnet": dict(map=str, default="default"),
+            # Compute resource configuration
+            "vcpu": dict(map=float, default=1.0),
+            "memory_mib": dict(map=int, default=2048),
+            # Container execution settings
+            "use_container": dict(map=bool, default=True),
+            "galaxy_user_id": dict(map=int, default=10001),
+            "galaxy_group_id": dict(map=int, default=10001),
+            # Custom VM image (optional)
+            "custom_vm_image": dict(map=str, default=None),
+            # Object store fallback (for future use)
+            "use_object_store": dict(map=bool, default=False),
+            "object_store_path": dict(map=str, default=None),
         }
 
         kwargs.update({"runner_param_specs": runner_param_specs})
@@ -210,6 +229,19 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "container_image",
             "max_retry_count",
             "max_run_duration",
+            "nfs_server",
+            "nfs_path",
+            "nfs_mount_path",
+            "network",
+            "subnet",
+            "vcpu",
+            "memory_mib",
+            "use_container",
+            "galaxy_user_id",
+            "galaxy_group_id",
+            "custom_vm_image",
+            "use_object_store",
+            "object_store_path",
         ]:
             params[key] = job_destination.params.get(key, self.runner_params.get(key))
 
@@ -220,27 +252,44 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         """Create a Google Cloud Batch job specification."""
         log.trace("Starting _create_batch_job_spec for job %s", job_wrapper.get_id_tag())
 
+        # Get container image from job wrapper if available, otherwise use params
+        container_image = self._get_container_image(job_wrapper, params)
+        log.debug("Using container image: %s for job %s", container_image, job_wrapper.get_id_tag())
+
+        # Create the execution script based on whether we use containers or not
+        if params.get("use_container", True):
+            execution_script = self._create_container_execution_script(job_wrapper, ajs, params, container_image)
+        else:
+            execution_script = self._create_direct_execution_script(job_wrapper, ajs, params)
+
+        # Create runnable with script execution
+        runnable = batch_v1.Runnable()
+        runnable.script = batch_v1.Runnable.Script()
+        runnable.script.text = execution_script
+
         # Create task specification
         task_spec = batch_v1.TaskSpec()
-
-        # Create container specification
-        container = batch_v1.Runnable.Container()
-        container.image_uri = params["container_image"]
-        container.commands = ["/bin/bash", ajs.job_file]
-
-        # Create runnable
-        runnable = batch_v1.Runnable()
-        runnable.container = container
-
         task_spec.runnables = [runnable]
         task_spec.max_retry_count = params["max_retry_count"]
         task_spec.max_run_duration = params["max_run_duration"]
 
-        # Set compute resources
+        # Set compute resources from parameters
         compute_resource = batch_v1.ComputeResource()
-        compute_resource.cpu_milli = 1000  # 1 CPU
-        compute_resource.memory_mib = 4096  # 4GB
+        compute_resource.cpu_milli = int(params["vcpu"] * 1000)
+        compute_resource.memory_mib = params["memory_mib"]
         task_spec.compute_resource = compute_resource
+
+        # Configure NFS volume if NFS server is specified
+        if params.get("nfs_server"):
+            volume = batch_v1.Volume()
+            volume.nfs = batch_v1.NFS()
+            volume.nfs.server = params["nfs_server"]
+            volume.nfs.remote_path = params.get("nfs_path", "/")
+            volume.mount_path = params.get("nfs_mount_path", "/mnt/nfs")
+            task_spec.volumes = [volume]
+            log.debug("Configured NFS volume: %s:%s -> %s for job %s", 
+                     params["nfs_server"], params.get("nfs_path", "/"), 
+                     params.get("nfs_mount_path", "/mnt/nfs"), job_wrapper.get_id_tag())
 
         # Create task group
         task_group = batch_v1.TaskGroup()
@@ -250,16 +299,37 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         # Create allocation policy
         allocation_policy = batch_v1.AllocationPolicy()
 
+        # Configure network for NFS access
+        if params.get("nfs_server"):
+            network_interface = batch_v1.AllocationPolicy.NetworkInterface()
+            network_interface.network = f"global/networks/{params.get('network', 'default')}"
+            network_interface.subnetwork = f"regions/{params['region']}/subnetworks/{params.get('subnet', 'default')}"
+            
+            network_policy = batch_v1.AllocationPolicy.NetworkPolicy()
+            network_policy.network_interfaces = [network_interface]
+            allocation_policy.network = network_policy
+            log.debug("Configured network for NFS access: %s/%s for job %s", 
+                     params.get('network', 'default'), params.get('subnet', 'default'), 
+                     job_wrapper.get_id_tag())
+
         # Configure instance
         instance_template = batch_v1.AllocationPolicy.InstancePolicyOrTemplate()
         instance_policy = batch_v1.AllocationPolicy.InstancePolicy()
         instance_policy.machine_type = params["machine_type"]
 
-        # Configure boot disk
-        disk = batch_v1.AllocationPolicy.Disk()
-        disk.size_gb = params["boot_disk_size_gb"]
-        disk.type_ = params["boot_disk_type"]
-        instance_policy.boot_disk = disk
+        # Use custom VM image if specified
+        if params.get("custom_vm_image"):
+            instance_policy.boot_disk = batch_v1.AllocationPolicy.Disk()
+            instance_policy.boot_disk.image = params["custom_vm_image"]
+            instance_policy.boot_disk.size_gb = params["boot_disk_size_gb"]
+            instance_policy.boot_disk.type_ = params["boot_disk_type"]
+            log.debug("Using custom VM image: %s for job %s", params["custom_vm_image"], job_wrapper.get_id_tag())
+        else:
+            # Configure standard boot disk
+            disk = batch_v1.AllocationPolicy.Disk()
+            disk.size_gb = params["boot_disk_size_gb"]
+            disk.type_ = params["boot_disk_type"]
+            instance_policy.boot_disk = disk
 
         instance_template.policy = instance_policy
         allocation_policy.instances = [instance_template]
@@ -269,39 +339,223 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         job.task_groups = [task_group]
         job.allocation_policy = allocation_policy
 
+        # Configure logging
+        job.logs_policy = batch_v1.LogsPolicy()
+        job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
+
         # Set labels for tracking
-        def _sanitize_label_value(value, max_length=63):
-            """Sanitize a value to be used as a GCP label value."""
-            if not value:
-                return "unknown"
-
-            # Convert to lowercase and replace invalid characters with dashes
-            sanitized = "".join(c.lower() if c.isalnum() else "-" for c in str(value))
-
-            # Remove consecutive dashes
-            while "--" in sanitized:
-                sanitized = sanitized.replace("--", "-")
-
-            # Ensure it starts and ends with alphanumeric characters
-            sanitized = sanitized.strip("-")
-            if not sanitized:
-                return "unknown"
-
-            # Truncate if too long
-            if len(sanitized) > max_length:
-                sanitized = sanitized[:max_length].rstrip("-")
-
-            # Ensure it's not empty after truncation
-            return sanitized if sanitized else "unknown"
-
         job.labels = {
             "galaxy-job-id": str(job_wrapper.job_id),
-            "galaxy-tool-id": _sanitize_label_value(job_wrapper.tool.id if job_wrapper.tool else "unknown"),
+            "galaxy-tool-id": self._sanitize_label_value(job_wrapper.tool.id if job_wrapper.tool else "unknown"),
             "galaxy-runner": "gcp-batch",
+            "galaxy-handler": self._sanitize_label_value(self.app.config.server_name),
         }
 
         log.trace("Finished _create_batch_job_spec for job %s", job_wrapper.get_id_tag())
         return job
+
+    def _get_container_image(self, job_wrapper, params):
+        """Get the container image to use for this job."""
+        log.trace("Starting _get_container_image for job %s", job_wrapper.get_id_tag())
+        
+        # Check if tool specifies a container
+        if hasattr(job_wrapper.tool, 'container') and job_wrapper.tool.container:
+            # Try to find the container from tool definition
+            container = self._find_container(job_wrapper)
+            if container and hasattr(container, 'container_id'):
+                log.trace("Finished _get_container_image for job %s (found tool container)", job_wrapper.get_id_tag())
+                return container.container_id
+        
+        # Fall back to configured container image
+        container_image = params.get("container_image", "ubuntu:20.04")
+        log.trace("Finished _get_container_image for job %s (using default)", job_wrapper.get_id_tag())
+        return container_image
+
+    def _find_container(self, job_wrapper):
+        """Find container for job wrapper (similar to AWS Batch runner approach)."""
+        log.trace("Starting _find_container for job %s", job_wrapper.get_id_tag())
+        
+        try:
+            if hasattr(job_wrapper.tool, 'containers') and job_wrapper.tool.containers:
+                # Get the first available container
+                for container in job_wrapper.tool.containers:
+                    log.trace("Finished _find_container for job %s (found in containers list)", job_wrapper.get_id_tag())
+                    return container
+            elif hasattr(job_wrapper.tool, 'container') and job_wrapper.tool.container:
+                log.trace("Finished _find_container for job %s (found single container)", job_wrapper.get_id_tag())
+                return job_wrapper.tool.container
+        except Exception as e:
+            log.debug("Could not find container for job %s: %s", job_wrapper.get_id_tag(), e)
+        
+        log.trace("Finished _find_container for job %s (no container found)", job_wrapper.get_id_tag())
+        return None
+
+    def _create_container_execution_script(self, job_wrapper, ajs, params, container_image):
+        """Create a script that runs the Galaxy job inside a container with NFS mounts."""
+        log.trace("Starting _create_container_execution_script for job %s", job_wrapper.get_id_tag())
+        
+        nfs_mount_path = params.get("nfs_mount_path", "/mnt/nfs")
+        galaxy_user_id = params.get("galaxy_user_id", 10001)
+        galaxy_group_id = params.get("galaxy_group_id", 10001)
+        
+        # Create the script that will be run on the Batch VM
+        script = f'''#!/bin/bash
+set -e
+echo "=== Galaxy GCP Batch Job Execution ==="
+echo "Job: {job_wrapper.get_id_tag()}"
+echo "Tool: {job_wrapper.tool.id if job_wrapper.tool else 'unknown'}"
+echo "Container: {container_image}"
+echo "Timestamp: $(date)"
+echo "Host: $(hostname)"
+echo ""
+
+# Check NFS mount
+if [ -d "{nfs_mount_path}" ]; then
+    echo "✓ NFS mount point exists: {nfs_mount_path}"
+    
+    if mount | grep "{nfs_mount_path}"; then
+        echo "✓ NFS is mounted successfully"
+        echo "NFS mount details:"
+        df -h "{nfs_mount_path}"
+        echo ""
+        
+        # Verify Galaxy job files are accessible
+        if [ -f "{ajs.job_file}" ]; then
+            echo "✓ Galaxy job script accessible: {ajs.job_file}"
+        else
+            echo "✗ Galaxy job script NOT accessible: {ajs.job_file}"
+            echo "Available files in job directory:"
+            ls -la "$(dirname {ajs.job_file})" || echo "Could not list job directory"
+            exit 1
+        fi
+        
+        # Set up environment variables for the container
+        export GALAXY_SLOTS=$(nproc)
+        export GALAXY_MEMORY_MB={params.get("memory_mib", 2048)}
+        
+        echo "Container environment:"
+        echo "  GALAXY_SLOTS=$GALAXY_SLOTS"
+        echo "  GALAXY_MEMORY_MB=$GALAXY_MEMORY_MB"
+        echo ""
+        
+        echo "=== Starting Container Execution ==="
+        # Run the Galaxy job script inside the container with NFS mount
+        docker run --rm \\
+            --user {galaxy_user_id}:{galaxy_group_id} \\
+            -v "{nfs_mount_path}:{nfs_mount_path}:rw" \\
+            -w "$(dirname {ajs.job_file})" \\
+            -e GALAXY_SLOTS="$GALAXY_SLOTS" \\
+            -e GALAXY_MEMORY_MB="$GALAXY_MEMORY_MB" \\
+            -e HOME=/tmp \\
+            "{container_image}" \\
+            /bin/bash "{ajs.job_file}"
+        
+        echo ""
+        echo "=== Container execution completed ==="
+        
+    else
+        echo "✗ NFS mount point exists but is not mounted"
+        echo "This indicates a Batch volume configuration issue"
+        exit 1
+    fi
+else
+    echo "✗ NFS mount point does not exist: {nfs_mount_path}"
+    echo "This indicates Batch volume was not configured properly"
+    exit 1
+fi
+
+echo "Galaxy job execution finished"
+'''
+        
+        log.trace("Finished _create_container_execution_script for job %s", job_wrapper.get_id_tag())
+        return script
+
+    def _create_direct_execution_script(self, job_wrapper, ajs, params):
+        """Create a script that runs the Galaxy job directly on the VM (without container)."""
+        log.trace("Starting _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
+        
+        nfs_mount_path = params.get("nfs_mount_path", "/mnt/nfs")
+        
+        # Create the script that will be run directly on the Batch VM
+        script = f'''#!/bin/bash
+set -e
+echo "=== Galaxy GCP Batch Job Execution (Direct) ==="
+echo "Job: {job_wrapper.get_id_tag()}"
+echo "Tool: {job_wrapper.tool.id if job_wrapper.tool else 'unknown'}"
+echo "Timestamp: $(date)"
+echo "Host: $(hostname)"
+echo ""
+
+# Check NFS mount
+if [ -d "{nfs_mount_path}" ]; then
+    echo "✓ NFS mount point exists: {nfs_mount_path}"
+    
+    if mount | grep "{nfs_mount_path}"; then
+        echo "✓ NFS is mounted successfully"
+        
+        # Verify Galaxy job files are accessible
+        if [ -f "{ajs.job_file}" ]; then
+            echo "✓ Galaxy job script accessible: {ajs.job_file}"
+        else
+            echo "✗ Galaxy job script NOT accessible: {ajs.job_file}"
+            exit 1
+        fi
+        
+        # Set up environment
+        export GALAXY_SLOTS=$(nproc)
+        export GALAXY_MEMORY_MB={params.get("memory_mib", 2048)}
+        
+        echo "Environment:"
+        echo "  GALAXY_SLOTS=$GALAXY_SLOTS"
+        echo "  GALAXY_MEMORY_MB=$GALAXY_MEMORY_MB"
+        echo ""
+        
+        echo "=== Starting Direct Execution ==="
+        # Execute the Galaxy job script directly
+        cd "$(dirname {ajs.job_file})"
+        /bin/bash "{ajs.job_file}"
+        
+        echo "=== Direct execution completed ==="
+        
+    else
+        echo "✗ NFS mount point exists but is not mounted"
+        exit 1
+    fi
+else
+    echo "✗ NFS mount point does not exist: {nfs_mount_path}"
+    exit 1
+fi
+
+echo "Galaxy job execution finished"
+'''
+        
+        log.trace("Finished _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
+        return script
+
+    @staticmethod
+    def _sanitize_label_value(value, max_length=63):
+        """Sanitize a value to be used as a GCP label value."""
+        if not value:
+            return "unknown"
+
+        # Convert to lowercase and replace invalid characters with dashes
+        sanitized = "".join(c.lower() if c.isalnum() else "-" for c in str(value))
+
+        # Remove consecutive dashes
+        while "--" in sanitized:
+            sanitized = sanitized.replace("--", "-")
+
+        # Ensure it starts and ends with alphanumeric characters
+        sanitized = sanitized.strip("-")
+        if not sanitized:
+            return "unknown"
+
+        # Truncate if too long
+        if len(sanitized) > max_length:
+            sanitized = sanitized[:max_length].rstrip("-")
+
+        # Ensure it's not empty after truncation
+        return sanitized if sanitized else "unknown"
 
     def _write_debug_files(self, job_wrapper, ajs, params, request, job_name):
         """Write job parameters and request object to JSON files for debugging."""
