@@ -58,13 +58,16 @@ RUN set -xe; \
 # Remove context from previous build; copy current context; run playbook
 WORKDIR /tmp/ansible
 RUN rm -rf *
-ENV LC_ALL en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
 RUN git clone --depth 1 --branch $GALAXY_PLAYBOOK_BRANCH $GALAXY_PLAYBOOK_REPO galaxy-docker
 WORKDIR /tmp/ansible/galaxy-docker
 RUN ansible-galaxy install -r requirements.yml -p roles --force-with-deps
 
 # Add Galaxy source code
-COPY . $SERVER_DIR/
+#COPY . $SERVER_DIR/
+COPY lib/ client/ client-api/ config/ lib/ scripts/ static/ templates/ tool-data/ tools/ $SERVER_DIR
+#COPY client $SERVER_DIR
+#COPY config $SERVER_DIR
 
 #======================================================
 # Stage 2.1 - Build galaxy server
@@ -72,12 +75,12 @@ COPY . $SERVER_DIR/
 FROM stage1 AS server_build
 ARG SERVER_DIR
 
-RUN ALLOW_BROKEN_CONDITIONALS=true ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false}" -e galaxy_virtualenv_command=virtualenv
+RUN ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false, galaxy_additional_venv_packages: false}" -e galaxy_virtualenv_command=virtualenv
 
 # Remove build artifacts + files not needed in container
 WORKDIR $SERVER_DIR
 # Save commit hash of HEAD before zapping git folder
-RUN git rev-parse HEAD > GITREVISION
+#RUN git rev-parse HEAD > GITREVISION
 RUN rm -rf \
         .ci \
         .git \
@@ -95,7 +98,7 @@ RUN find . -name "node_modules" -type d -prune -exec rm -rf '{}' +
 FROM stage1 AS client_build
 ARG SERVER_DIR
 
-RUN ALLOW_BROKEN_CONDITIONALS=true ansible-playbook -i localhost, playbook.yml -v --tags "galaxy_build_client" -e galaxy_virtualenv_command=virtualenv
+RUN ansible-playbook -i localhost, playbook.yml -v --tags "galaxy_build_client" -e "{galaxy_additional_venv_packages: false}" -e galaxy_virtualenv_command=virtualenv
 
 WORKDIR $SERVER_DIR
 RUN rm -rf \
@@ -181,7 +184,7 @@ COPY --chown=$GALAXY_USER:$GALAXY_USER --from=client_build $SERVER_DIR/static ./
 WORKDIR $SERVER_DIR
 
 # The data in version.json will be displayed in Galaxy's /api/version endpoint
-RUN printf "{\n  \"git_commit\": \"$(cat GITREVISION)\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
+RUN printf "{\n  \"git_commit\": \"$GIT_COMMIT\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
     && chown $GALAXY_USER:$GALAXY_USER version.json
 
 EXPOSE 8080
