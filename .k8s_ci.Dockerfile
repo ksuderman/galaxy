@@ -65,9 +65,16 @@ RUN ansible-galaxy install -r requirements.yml -p roles --force-with-deps
 
 # Add Galaxy source code
 #COPY . $SERVER_DIR/
-COPY lib/ client/ client-api/ config/ lib/ scripts/ static/ templates/ tool-data/ tools/ $SERVER_DIR
-#COPY client $SERVER_DIR
-#COPY config $SERVER_DIR
+COPY lib/ $SERVER_DIR
+COPY client/ $SERVER_DIR
+COPY client-api/ $SERVER_DIR
+COPY config/ $SERVER_DIR
+COPY lib/ $SERVER_DIR
+COPY scripts/ $SERVER_DIR
+COPY static/ $SERVER_DIR
+COPY templates/ $SERVER_DIR
+COPY tool-data/ $SERVER_DIR
+COPY tools/ $SERVER_DIR
 
 #======================================================
 # Stage 2.1 - Build galaxy server
