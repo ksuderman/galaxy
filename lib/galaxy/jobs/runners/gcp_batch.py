@@ -287,9 +287,13 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             volume.nfs.remote_path = params.get("nfs_path", "/")
             volume.mount_path = params.get("nfs_mount_path", "/mnt/nfs")
             task_spec.volumes = [volume]
-            log.debug("Configured NFS volume: %s:%s -> %s for job %s", 
-                     params["nfs_server"], params.get("nfs_path", "/"), 
-                     params.get("nfs_mount_path", "/mnt/nfs"), job_wrapper.get_id_tag())
+            log.debug(
+                "Configured NFS volume: %s:%s -> %s for job %s",
+                params["nfs_server"],
+                params.get("nfs_path", "/"),
+                params.get("nfs_mount_path", "/mnt/nfs"),
+                job_wrapper.get_id_tag(),
+            )
 
         # Create task group
         task_group = batch_v1.TaskGroup()
@@ -304,13 +308,16 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             network_interface = batch_v1.AllocationPolicy.NetworkInterface()
             network_interface.network = f"global/networks/{params.get('network', 'default')}"
             network_interface.subnetwork = f"regions/{params['region']}/subnetworks/{params.get('subnet', 'default')}"
-            
+
             network_policy = batch_v1.AllocationPolicy.NetworkPolicy()
             network_policy.network_interfaces = [network_interface]
             allocation_policy.network = network_policy
-            log.debug("Configured network for NFS access: %s/%s for job %s", 
-                     params.get('network', 'default'), params.get('subnet', 'default'), 
-                     job_wrapper.get_id_tag())
+            log.debug(
+                "Configured network for NFS access: %s/%s for job %s",
+                params.get("network", "default"),
+                params.get("subnet", "default"),
+                job_wrapper.get_id_tag(),
+            )
 
         # Configure instance
         instance_template = batch_v1.AllocationPolicy.InstancePolicyOrTemplate()
@@ -357,15 +364,15 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
     def _get_container_image(self, job_wrapper, params):
         """Get the container image to use for this job."""
         log.trace("Starting _get_container_image for job %s", job_wrapper.get_id_tag())
-        
+
         # Check if tool specifies a container
-        if hasattr(job_wrapper.tool, 'container') and job_wrapper.tool.container:
+        if hasattr(job_wrapper.tool, "container") and job_wrapper.tool.container:
             # Try to find the container from tool definition
             container = self._find_container(job_wrapper)
-            if container and hasattr(container, 'container_id'):
+            if container and hasattr(container, "container_id"):
                 log.trace("Finished _get_container_image for job %s (found tool container)", job_wrapper.get_id_tag())
                 return container.container_id
-        
+
         # Fall back to configured container image
         container_image = params.get("container_image", "ubuntu:20.04")
         log.trace("Finished _get_container_image for job %s (using default)", job_wrapper.get_id_tag())
@@ -374,32 +381,34 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
     def _find_container(self, job_wrapper):
         """Find container for job wrapper (similar to AWS Batch runner approach)."""
         log.trace("Starting _find_container for job %s", job_wrapper.get_id_tag())
-        
+
         try:
-            if hasattr(job_wrapper.tool, 'containers') and job_wrapper.tool.containers:
+            if hasattr(job_wrapper.tool, "containers") and job_wrapper.tool.containers:
                 # Get the first available container
                 for container in job_wrapper.tool.containers:
-                    log.trace("Finished _find_container for job %s (found in containers list)", job_wrapper.get_id_tag())
+                    log.trace(
+                        "Finished _find_container for job %s (found in containers list)", job_wrapper.get_id_tag()
+                    )
                     return container
-            elif hasattr(job_wrapper.tool, 'container') and job_wrapper.tool.container:
+            elif hasattr(job_wrapper.tool, "container") and job_wrapper.tool.container:
                 log.trace("Finished _find_container for job %s (found single container)", job_wrapper.get_id_tag())
                 return job_wrapper.tool.container
         except Exception as e:
             log.debug("Could not find container for job %s: %s", job_wrapper.get_id_tag(), e)
-        
+
         log.trace("Finished _find_container for job %s (no container found)", job_wrapper.get_id_tag())
         return None
 
     def _create_container_execution_script(self, job_wrapper, ajs, params, container_image):
         """Create a script that runs the Galaxy job inside a container with NFS mounts."""
         log.trace("Starting _create_container_execution_script for job %s", job_wrapper.get_id_tag())
-        
+
         nfs_mount_path = params.get("nfs_mount_path", "/mnt/nfs")
         galaxy_user_id = params.get("galaxy_user_id", 10001)
         galaxy_group_id = params.get("galaxy_group_id", 10001)
-        
+
         # Create the script that will be run on the Batch VM
-        script = f'''#!/bin/bash
+        script = f"""#!/bin/bash
 set -e
 echo "=== Galaxy GCP Batch Job Execution ==="
 echo "Job: {job_wrapper.get_id_tag()}"
@@ -465,19 +474,19 @@ else
 fi
 
 echo "Galaxy job execution finished"
-'''
-        
+"""
+
         log.trace("Finished _create_container_execution_script for job %s", job_wrapper.get_id_tag())
         return script
 
     def _create_direct_execution_script(self, job_wrapper, ajs, params):
         """Create a script that runs the Galaxy job directly on the VM (without container)."""
         log.trace("Starting _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
-        
+
         nfs_mount_path = params.get("nfs_mount_path", "/mnt/nfs")
-        
+
         # Create the script that will be run directly on the Batch VM
-        script = f'''#!/bin/bash
+        script = f"""#!/bin/bash
 set -e
 echo "=== Galaxy GCP Batch Job Execution (Direct) ==="
 echo "Job: {job_wrapper.get_id_tag()}"
@@ -527,8 +536,8 @@ else
 fi
 
 echo "Galaxy job execution finished"
-'''
-        
+"""
+
         log.trace("Finished _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
         return script
 

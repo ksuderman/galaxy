@@ -1,40 +1,36 @@
 import logging
 
-from galaxy.util.logging import set_logging_levels_from_config, DebuggingLogHander
+from galaxy.util.logging import (
+    DebuggingLogHander,
+    set_logging_levels_from_config,
+)
 
-set_logging_levels_from_config({
-    'galaxy.*': logging.ERROR,
-    'galaxy.datatypes.display_applications.application': logging.CRITICAL,
-    'galaxy.webapps.galaxy.api.logging.*': logging.TRACE,
-    'galaxy_test.api.test_logging': logging.TRACE
-})
+set_logging_levels_from_config(
+    {
+        "galaxy.*": logging.ERROR,
+        "galaxy.datatypes.display_applications.application": logging.CRITICAL,
+        "galaxy.webapps.galaxy.api.logging.*": logging.TRACE,
+        "galaxy_test.api.test_logging": logging.TRACE,
+    }
+)
 
 from ._framework import ApiTestCase
 
-
 SIMPLE_LOGGING_CONFIG = {
-    'version': 1,
-    'disable_existing_loggers': True,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'level': 'DEBUG',
-            'formatter': 'simple',
-            'stream': 'ext://sys.stdout'
+    "version": 1,
+    "disable_existing_loggers": True,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "simple",
+            "stream": "ext://sys.stdout",
         }
     },
-    'formatters': {
-        'simple': {
-            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        }
-    },
-    'loggers': {
-        'test': {
-            'level': 'DEBUG',
-            'handlers': ['console']
-        }
-    }
+    "formatters": {"simple": {"format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"}},
+    "loggers": {"test": {"level": "DEBUG", "handlers": ["console"]}},
 }
+
 
 class TestLoggingApi(ApiTestCase):
 
@@ -42,7 +38,6 @@ class TestLoggingApi(ApiTestCase):
         assert hasattr(logging, "TRACE")
         assert hasattr(logging, "trace")
         assert logging.TRACE == logging.DEBUG - 5
-
 
     def test_index(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
@@ -52,7 +47,6 @@ class TestLoggingApi(ApiTestCase):
         # These are the only loggers that we can be sure are present.
         assert "test" in logger_names
 
-
     def test_get(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
         response = self._get("logging/test", admin=True)
@@ -60,15 +54,14 @@ class TestLoggingApi(ApiTestCase):
         logger_levels = response.json()
         assert len(logger_levels) == 1
         assert "test" in logger_levels
-        logger_level = logger_levels['test']
+        logger_level = logger_levels["test"]
         assert logger_level["name"] == "test"
         assert logger_level["level"] == "DEBUG"
         assert logger_level["effective"] == "DEBUG"
 
-
     def test_set(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
-        response = self._post("logging/test?level=CRITICAL", admin=True) #, data={"level": "CRITICAL"})
+        response = self._post("logging/test?level=CRITICAL", admin=True)  # , data={"level": "CRITICAL"})
         print(response.text)
         response.raise_for_status()
         response = self._get("logging/test", admin=True)
@@ -77,7 +70,7 @@ class TestLoggingApi(ApiTestCase):
         assert len(logger_levels) == 1
         assert "test" in logger_levels
         logger_level = logger_levels["test"]
-        assert  logger_level["name"] == "test"
+        assert logger_level["name"] == "test"
         assert logger_level["level"] == "CRITICAL"
         assert logger_level["effective"] == "CRITICAL"
 
@@ -96,7 +89,7 @@ class TestLoggingApi(ApiTestCase):
 
     def test_set_existing_logger(self):
         logging.config.dictConfig(SIMPLE_LOGGING_CONFIG)
-        logger = logging.getLogger('test')
+        logger = logging.getLogger("test")
         handler = DebuggingLogHander()
         logger.addHandler(handler)
         logger.trace("TRACE")

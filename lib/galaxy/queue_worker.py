@@ -336,7 +336,7 @@ control_message_to_task = {
     "reconfigure_watcher": reconfigure_watcher,
     "reload_tour": reload_tour,
     "reload_core_config": reload_core_config,
-    "set_logging_levels": set_logging_levels
+    "set_logging_levels": set_logging_levels,
 }
 
 

@@ -1,6 +1,8 @@
-import logging 
-from typing import List, Dict
-
+import logging
+from typing import (
+    Dict,
+    List,
+)
 
 TRACE = logging.DEBUG - 5
 
@@ -8,13 +10,13 @@ log = logging.getLogger(__name__)
 
 
 def addTraceLoggingLevel():
-    addLoggingLevel('TRACE', TRACE)
+    addLoggingLevel("TRACE", TRACE)
 
 
 def set_logging_levels_from_config(configuration: dict):
     all_logger_names = logging.Logger.manager.loggerDict.keys()
     settings = dict()
-    for name,level in configuration.items():
+    for name, level in configuration.items():
         if type(level) == int:
             level = logging.getLevelName(level)
         else:
@@ -26,12 +28,12 @@ def set_logging_levels_from_config(configuration: dict):
                     settings[name] = level
         else:
             settings[name] = level
-    for name,level in settings.items():
+    for name, level in settings.items():
         logging.getLogger(name).setLevel(level)
 
 
 def _get_level_info(logger) -> Dict[str, str]:
-    '''
+    """
     Get the level and effective level of a logger
 
     :param logger: The logger to get the info for
@@ -39,36 +41,31 @@ def _get_level_info(logger) -> Dict[str, str]:
 
     :return: The level and effective level of the logger
     :rtype: Dict[str, str]
-    '''
+    """
     if logger is None:
-        return {
-            "name": "None",
-            "level": "NOTSET",
-            "effective": "NOTSET"
-        }
+        return {"name": "None", "level": "NOTSET", "effective": "NOTSET"}
     return {
         "name": logger.name,
         "level": logging.getLevelName(logger.level),
-        "effective": logging.getLevelName(logger.getEffectiveLevel())
+        "effective": logging.getLevelName(logger.getEffectiveLevel()),
     }
 
 
 def get_logger_names() -> List[str]:
-    '''
+    """
     Gets the names of all the currently configured loggers.
 
     :return: The names of all the currently configured loggers
     :rtype: List[str]
-    '''
+    """
     log.info("Getting a list of all configured loggers")
     logger_dict = logging.Logger.manager.loggerDict
     loggers = [name for name in logger_dict if isinstance(logger_dict[name], logging.Logger)]
     return loggers
 
 
-
 def get_log_levels(name) -> Dict[str, Dict[str, str]]:
-    '''
+    """
     Get the log level for a one or more loggers. If no name is provided then
     the levels for all loggers is returned.
 
@@ -77,7 +74,7 @@ def get_log_levels(name) -> Dict[str, Dict[str, str]]:
 
     :return: The log level for the logger
     :rtype: Dict[str, Dict[str, str]]
-    '''
+    """
     # if not trans.user_is_admin:
     #     log.warning("Only admins can get log level")
     #     raise AdminRequiredException()
@@ -98,13 +95,13 @@ def get_log_levels(name) -> Dict[str, Dict[str, str]]:
         return result
     elif name in loggers:
         logger = logging.getLogger(name)
-        return { name: _get_level_info(logger) }
+        return {name: _get_level_info(logger)}
     log.warning("Logger %s not found", name)
-    return { "UNKNOWN": _get_level_info(None) }
+    return {"UNKNOWN": _get_level_info(None)}
 
 
-def set_log_levels(name, level) -> List[Dict[str,str]]:
-    '''
+def set_log_levels(name, level) -> List[Dict[str, str]]:
+    """
     Set the log level for a one or more loggers.
 
     To set the level for a single logger, pass the name of the logger. To set
@@ -119,7 +116,7 @@ def set_log_levels(name, level) -> List[Dict[str,str]]:
 
     :return: The log level for the logger
     :rtype: LoggerLevelInfo
-    '''
+    """
     # if not trans.user_is_admin:
     #     log.warning("Only admins can set log level")
     #     raise AdminRequiredException()
@@ -179,17 +176,24 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
         methodName = levelName.lower()
 
     if hasattr(logging, levelName) or hasattr(logging, methodName) or hasattr(logging.getLoggerClass(), methodName):
-        logging.warning("Attempted to add logging level %s with level number %d and method name %s, but one or more already exist", levelName, levelNum, methodName)
+        logging.warning(
+            "Attempted to add logging level %s with level number %d and method name %s, but one or more already exist",
+            levelName,
+            levelNum,
+            methodName,
+        )
         # traceback.print_stack()
         return
 
     # TDOD: Do we really want to do this here?
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d - %(message)s')
+    logging.basicConfig(
+        level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d - %(message)s"
+    )
 
     def logForLevel(self, message, *args, **kwargs):
         if self.isEnabledFor(levelNum):
             self._log(levelNum, message, args, **kwargs)
+
     def logToRoot(message, *args, **kwargs):
         logging.log(levelNum, message, *args, **kwargs)
 
@@ -205,6 +209,7 @@ class DebuggingLogHander(logging.Handler):
     A log handler used during testing to capture log records in memory so we
     can validate what has been logged.
     """
+
     def __init__(self):
         logging.Handler.__init__(self)
         self.records = []

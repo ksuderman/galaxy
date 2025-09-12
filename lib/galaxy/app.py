@@ -7,6 +7,7 @@ import logging
 # it is only needed once provided we do it early enough in the code loading
 # process.
 from galaxy.util.logging import addTraceLoggingLevel
+
 addTraceLoggingLevel()
 
 import os
