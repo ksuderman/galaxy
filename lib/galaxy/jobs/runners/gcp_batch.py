@@ -62,9 +62,14 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             # Network configuration for NFS access
             "network": dict(map=str, default="default"),
             "subnet": dict(map=str, default="default"),
-            # Compute resource configuration
+            # Compute resource configuration (defaults - will be overridden by job requirements)
             "vcpu": dict(map=float, default=1.0),
             "memory_mib": dict(map=int, default=2048),
+            # Job-specific resource requests (same as Kubernetes runner)
+            "requests_cpu": dict(map=str, default=None),
+            "requests_memory": dict(map=str, default=None),
+            "limits_cpu": dict(map=str, default=None),
+            "limits_memory": dict(map=str, default=None),
             # Container execution settings
             "use_container": dict(map=bool, default=True),
             "galaxy_user_id": dict(map=int, default=10001),
@@ -275,11 +280,15 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         task_spec.max_retry_count = params["max_retry_count"]
         task_spec.max_run_duration = params["max_run_duration"]
 
-        # Set compute resources from parameters
+        # Set compute resources from job requirements or fallback to parameters
         compute_resource = batch_v1.ComputeResource()
-        compute_resource.cpu_milli = int(params["vcpu"] * 1000)
-        compute_resource.memory_mib = params["memory_mib"]
+        cpu_milli, memory_mib = self._get_job_resources(job_wrapper, params)
+        compute_resource.cpu_milli = cpu_milli
+        compute_resource.memory_mib = memory_mib
         task_spec.compute_resource = compute_resource
+
+        log.debug("Configured compute resources for job %s: %d mCPU, %d MiB memory",
+                 job_wrapper.get_id_tag(), cpu_milli, memory_mib)
 
         # Configure NFS volume if NFS server is specified
         if params.get("nfs_server"):
@@ -411,6 +420,128 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         log.trace("Finished _find_container for job %s (no container found)", job_wrapper.get_id_tag())
         return None
 
+    def _get_job_resources(self, job_wrapper, params):
+        """
+        Extract CPU and memory requirements from job wrapper and return as GCP Batch format.
+        Returns tuple of (cpu_milli, memory_mib).
+        """
+        # Get job destination parameters
+        job_destination = job_wrapper.job_destination
+
+        # Determine CPU requirements (in milli-cores)
+        cpu_milli = self._get_cpu_milli(job_destination, params)
+
+        # Determine memory requirements (in MiB)
+        memory_mib = self._get_memory_mib(job_destination, params)
+
+        # Also update environment variables based on actual allocated resources
+        cpu_cores = cpu_milli / 1000.0
+        params["computed_galaxy_slots"] = max(1, int(cpu_cores))
+        params["computed_galaxy_memory_mb"] = memory_mib
+
+        log.debug("Job %s resource requirements: %.1f CPU cores (%d mCPU), %d MiB memory",
+                 job_wrapper.get_id_tag(), cpu_cores, cpu_milli, memory_mib)
+
+        return cpu_milli, memory_mib
+
+    def _get_cpu_milli(self, job_destination, params):
+        """Get CPU requirements in milli-cores (1000 = 1 vCPU)."""
+        # Check for job-specific CPU requests (highest priority)
+        if "requests_cpu" in job_destination.params:
+            cpu_str = job_destination.params["requests_cpu"]
+            return self._convert_cpu_to_milli(cpu_str)
+
+        # Check for job-specific CPU limits
+        if "limits_cpu" in job_destination.params:
+            cpu_str = job_destination.params["limits_cpu"]
+            return self._convert_cpu_to_milli(cpu_str)
+
+        # Fall back to configured default
+        default_vcpu = float(params.get("vcpu", 1.0))
+        return int(default_vcpu * 1000)
+
+    def _get_memory_mib(self, job_destination, params):
+        """Get memory requirements in MiB."""
+        # Check for job-specific memory requests (highest priority)
+        if "requests_memory" in job_destination.params:
+            memory_str = job_destination.params["requests_memory"]
+            return self._convert_memory_to_mib(memory_str)
+
+        # Check for job-specific memory limits
+        if "limits_memory" in job_destination.params:
+            memory_str = job_destination.params["limits_memory"]
+            return self._convert_memory_to_mib(memory_str)
+
+        # Fall back to configured default
+        return int(params.get("memory_mib", 2048))
+
+    def _convert_cpu_to_milli(self, cpu_str):
+        """
+        Convert CPU specification to milli-cores.
+        Supports formats like: "1", "1.5", "500m", "0.5"
+        """
+        if not cpu_str:
+            return 1000  # Default to 1 vCPU
+
+        cpu_str = str(cpu_str).strip()
+
+        # Handle milli-core format (e.g., "500m")
+        if cpu_str.endswith('m'):
+            try:
+                return int(cpu_str[:-1])
+            except ValueError:
+                log.warning("Invalid CPU format: %s, using default", cpu_str)
+                return 1000
+
+        # Handle decimal format (e.g., "1.5", "0.5")
+        try:
+            cpu_float = float(cpu_str)
+            return int(cpu_float * 1000)
+        except ValueError:
+            log.warning("Invalid CPU format: %s, using default", cpu_str)
+            return 1000
+
+    def _convert_memory_to_mib(self, memory_str):
+        """
+        Convert memory specification to MiB.
+        Supports formats like: "1Gi", "512Mi", "1024M", "1G", "2048"
+        """
+        if not memory_str:
+            return 2048  # Default to 2 GiB
+
+        memory_str = str(memory_str).strip()
+
+        # Handle plain numbers (assume MiB)
+        if memory_str.isdigit():
+            return int(memory_str)
+
+        # Extract number and unit
+        import re
+        match = re.match(r'^(\d+(?:\.\d+)?)\s*([A-Za-z]*)$', memory_str)
+        if not match:
+            log.warning("Invalid memory format: %s, using default", memory_str)
+            return 2048
+
+        value = float(match.group(1))
+        unit = match.group(2).lower()
+
+        # Convert to MiB based on unit
+        if unit in ['', 'mib', 'mi']:
+            return int(value)
+        elif unit in ['gib', 'gi']:
+            return int(value * 1024)  # GiB to MiB
+        elif unit in ['mb', 'm']:
+            return int(value * 1000 / 1024)  # MB to MiB (decimal to binary)
+        elif unit in ['gb', 'g']:
+            return int(value * 1000 * 1000 / 1024 / 1024)  # GB to MiB
+        elif unit in ['kib', 'ki']:
+            return int(value / 1024)  # KiB to MiB
+        elif unit in ['kb', 'k']:
+            return int(value * 1000 / 1024 / 1024)  # KB to MiB
+        else:
+            log.warning("Unknown memory unit: %s, treating as MiB", unit)
+            return int(value)
+
     def _create_container_execution_script(self, job_wrapper, ajs, params, container_image):
         """Create a script that runs the Galaxy job inside a container with NFS mounts."""
         log.trace("Starting _create_container_execution_script for job %s", job_wrapper.get_id_tag())
@@ -496,8 +627,8 @@ if [ -d "{nfs_mount_path}" ]; then
         fi
         
         # Set up environment variables for the container
-        export GALAXY_SLOTS=$(nproc)
-        export GALAXY_MEMORY_MB={params.get("memory_mib", 2048)}
+        export GALAXY_SLOTS={params.get("computed_galaxy_slots", "$(nproc)")}
+        export GALAXY_MEMORY_MB={params.get("computed_galaxy_memory_mb", params.get("memory_mib", 2048))}
         
         echo "Container environment:"
         echo "  GALAXY_SLOTS=$GALAXY_SLOTS"
@@ -590,8 +721,8 @@ if [ -d "{nfs_mount_path}" ]; then
         fi
         
         # Set up environment
-        export GALAXY_SLOTS=$(nproc)
-        export GALAXY_MEMORY_MB={params.get("memory_mib", 2048)}
+        export GALAXY_SLOTS={params.get("computed_galaxy_slots", "$(nproc)")}
+        export GALAXY_MEMORY_MB={params.get("computed_galaxy_memory_mb", params.get("memory_mib", 2048))}
         
         echo "Environment:"
         echo "  GALAXY_SLOTS=$GALAXY_SLOTS"
