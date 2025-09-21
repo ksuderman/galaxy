@@ -6,8 +6,6 @@
 database/
 packages/
 client/node_modules/
-static/plugins/visualizations/nora/
-static/plugins/visualizations/*/static/dist/
 test-data/
 doc/
 *.log

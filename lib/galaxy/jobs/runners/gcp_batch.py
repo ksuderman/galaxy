@@ -47,6 +47,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "region": dict(map=str, default="us-central1"),
             "zone": dict(map=str, default=None),
             "service_account_file": dict(map=str, default=None),
+            "service_account_email": dict(map=str, default=None),
             "machine_type": dict(map=str, default="e2-standard-4"),
             "boot_disk_size_gb": dict(map=int, default=100),
             "boot_disk_type": dict(map=str, default="pd-standard"),
@@ -242,6 +243,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "custom_vm_image",
             "use_object_store",
             "object_store_path",
+            "service_account_email",
         ]:
             params[key] = job_destination.params.get(key, self.runner_params.get(key))
 
@@ -341,6 +343,16 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         instance_template.policy = instance_policy
         allocation_policy.instances = [instance_template]
 
+        # Configure service account for job execution
+        service_account_email = params.get("service_account_email")
+        if service_account_email:
+            service_account = batch_v1.ServiceAccount()
+            service_account.email = service_account_email
+            allocation_policy.service_account = service_account
+            log.debug("Configured service account: %s for job %s", service_account_email, job_wrapper.get_id_tag())
+        else:
+            log.warning("No service account email specified for job %s - using default compute service account", job_wrapper.get_id_tag())
+
         # Create job
         job = batch_v1.Job()
         job.task_groups = [task_group]
@@ -418,16 +430,52 @@ echo "Timestamp: $(date)"
 echo "Host: $(hostname)"
 echo ""
 
+# Debug network and NFS connectivity
+echo "=== Network and NFS Connectivity Debug ==="
+echo "Testing NFS server connectivity: {params.get('nfs_server', 'N/A')}"
+if ping -c 3 {params.get('nfs_server', '127.0.0.1')} > /dev/null 2>&1; then
+    echo "✓ NFS server is reachable via ping"
+else
+    echo "✗ NFS server is NOT reachable via ping"
+fi
+
+# Check if NFS client tools are available
+echo "Checking NFS client availability:"
+which mount.nfs4 || echo "mount.nfs4 not found - installing nfs-utils"
+apt-get update -qq && apt-get install -y nfs-common > /dev/null 2>&1 || echo "Failed to install nfs-common"
+
+# Check all mounts
+echo "Current mounts:"
+mount | grep -E "(nfs|{nfs_mount_path})" || echo "No NFS mounts found"
+
 # Check NFS mount
 if [ -d "{nfs_mount_path}" ]; then
     echo "✓ NFS mount point exists: {nfs_mount_path}"
-    
+
     if mount | grep "{nfs_mount_path}"; then
         echo "✓ NFS is mounted successfully"
         echo "NFS mount details:"
         df -h "{nfs_mount_path}"
+        mount | grep "{nfs_mount_path}"
         echo ""
-        
+
+        # Fix NFS attribute caching by remounting with actimeo=0
+        echo "=== Fixing NFS attribute caching ==="
+        NFS_SERVER=$(mount | grep "{nfs_mount_path}" | cut -d: -f1)
+        NFS_PATH=$(mount | grep "{nfs_mount_path}" | cut -d: -f2 | cut -d' ' -f1)
+        echo "Remounting $NFS_SERVER:$NFS_PATH with actimeo=0 to disable attribute caching"
+
+        # Remount with optimized options
+        umount "{nfs_mount_path}" || echo "Warning: umount failed"
+        mount -t nfs4 -o rw,hard,intr,rsize=1048576,wsize=1048576,actimeo=0 "$NFS_SERVER:$NFS_PATH" "{nfs_mount_path}"
+
+        echo "NFS remounted with optimized options:"
+        mount | grep "{nfs_mount_path}"
+        echo ""
+
+        # Wait a moment for NFS to sync
+        sleep 2
+
         # Verify Galaxy job files are accessible
         if [ -f "{ajs.job_file}" ]; then
             echo "✓ Galaxy job script accessible: {ajs.job_file}"
@@ -435,6 +483,15 @@ if [ -d "{nfs_mount_path}" ]; then
             echo "✗ Galaxy job script NOT accessible: {ajs.job_file}"
             echo "Available files in job directory:"
             ls -la "$(dirname {ajs.job_file})" || echo "Could not list job directory"
+
+            # Try to find the job directory
+            echo "Searching for job directory in NFS mount:"
+            find "{nfs_mount_path}" -name "jobs_directory" -type d 2>/dev/null | head -5
+
+            # List what's actually in the NFS root
+            echo "Contents of NFS root:"
+            ls -la "{nfs_mount_path}/" || echo "Could not list NFS root"
+
             exit 1
         fi
         
@@ -464,13 +521,35 @@ if [ -d "{nfs_mount_path}" ]; then
         
     else
         echo "✗ NFS mount point exists but is not mounted"
-        echo "This indicates a Batch volume configuration issue"
-        exit 1
+        echo "Attempting manual NFS mount as fallback..."
+
+        # Try manual NFS mount
+        if mount -t nfs4 -o rw,hard,intr,rsize=1048576,wsize=1048576,actimeo=0 {params.get('nfs_server', '127.0.0.1')}:{params.get('nfs_path', '/')} "{nfs_mount_path}"; then
+            echo "✓ Manual NFS mount successful"
+            mount | grep "{nfs_mount_path}"
+        else
+            echo "✗ Manual NFS mount failed"
+            echo "Debug information:"
+            echo "  NFS Server: {params.get('nfs_server', 'N/A')}"
+            echo "  NFS Path: {params.get('nfs_path', '/')}"
+            echo "  Mount Path: {nfs_mount_path}"
+            exit 1
+        fi
     fi
 else
     echo "✗ NFS mount point does not exist: {nfs_mount_path}"
-    echo "This indicates Batch volume was not configured properly"
-    exit 1
+    echo "Creating mount point and attempting manual mount..."
+    mkdir -p "{nfs_mount_path}"
+
+    # Try manual NFS mount
+    if mount -t nfs4 -o rw,hard,intr,rsize=1048576,wsize=1048576,actimeo=0 {params.get('nfs_server', '127.0.0.1')}:{params.get('nfs_path', '/')} "{nfs_mount_path}"; then
+        echo "✓ Manual NFS mount successful after creating mount point"
+        mount | grep "{nfs_mount_path}"
+    else
+        echo "✗ Manual NFS mount failed"
+        echo "This indicates network connectivity or permission issues"
+        exit 1
+    fi
 fi
 
 echo "Galaxy job execution finished"
