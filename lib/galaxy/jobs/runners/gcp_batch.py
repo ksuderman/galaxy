@@ -51,7 +51,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "machine_type": dict(map=str, default="e2-standard-4"),
             "boot_disk_size_gb": dict(map=int, default=100),
             "boot_disk_type": dict(map=str, default="pd-standard"),
-            "container_image": dict(map=str, default="ubuntu:20.04"),
+            "container_image": dict(map=str, default="quay.io/galaxyproject/galaxy-min:25.1"),
             "max_retry_count": dict(map=int, default=3),
             "max_run_duration": dict(map=str, default="3600s"),
             "polling_interval": dict(map=int, default=30),
@@ -386,39 +386,33 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         """Get the container image to use for this job."""
         log.trace("Starting _get_container_image for job %s", job_wrapper.get_id_tag())
 
-        # Check if tool specifies a container
-        if hasattr(job_wrapper.tool, "container") and job_wrapper.tool.container:
-            # Try to find the container from tool definition
-            container = self._find_container(job_wrapper)
-            if container and hasattr(container, "container_id"):
-                log.trace("Finished _get_container_image for job %s (found tool container)", job_wrapper.get_id_tag())
-                return container.container_id
+        # Use Galaxy's container finder system (same approach as Kubernetes runner)
+        # This takes precedence over any configuration overrides to ensure tool compatibility
+        container = self._find_container(job_wrapper)
+        if container:
+            log.info("Found a container")
+        else:
+            log.info("No container found")
+        if container and hasattr(container, "container_id") and container.container_id:
+            log.info("Using tool-specific container: %s for job %s (ignoring config overrides)", container.container_id, job_wrapper.get_id_tag())
+            log.trace("Finished _get_container_image for job %s (found tool container)", job_wrapper.get_id_tag())
+            return container.container_id
 
-        # Fall back to configured container image
-        container_image = params.get("container_image", "ubuntu:20.04")
-        log.trace("Finished _get_container_image for job %s (using default)", job_wrapper.get_id_tag())
-        return container_image
+        # Check if there's a configuration override (this might be outdated ubuntu:20.04)
+        config_container = params.get("container_image")
+        if config_container and config_container not in ["ubuntu:20.04", "ubuntu:latest"]:
+            # Use configured container if it's not the problematic defaults
+            log.debug("Using configured container: %s for job %s", config_container, job_wrapper.get_id_tag())
+            log.trace("Finished _get_container_image for job %s (using configured container)", job_wrapper.get_id_tag())
+            return config_container
 
-    def _find_container(self, job_wrapper):
-        """Find container for job wrapper (similar to AWS Batch runner approach)."""
-        log.trace("Starting _find_container for job %s", job_wrapper.get_id_tag())
+        # Fall back to our improved default (Galaxy-compatible image)
+        default_container = "ksuderman/galaxy-min:25.1-batch"
+        log.info("Using improved default container: %s for job %s (config had problematic default: %s)",
+                default_container, job_wrapper.get_id_tag(), config_container)
+        log.trace("Finished _get_container_image for job %s (using improved default)", job_wrapper.get_id_tag())
+        return default_container
 
-        try:
-            if hasattr(job_wrapper.tool, "containers") and job_wrapper.tool.containers:
-                # Get the first available container
-                for container in job_wrapper.tool.containers:
-                    log.trace(
-                        "Finished _find_container for job %s (found in containers list)", job_wrapper.get_id_tag()
-                    )
-                    return container
-            elif hasattr(job_wrapper.tool, "container") and job_wrapper.tool.container:
-                log.trace("Finished _find_container for job %s (found single container)", job_wrapper.get_id_tag())
-                return job_wrapper.tool.container
-        except Exception as e:
-            log.debug("Could not find container for job %s: %s", job_wrapper.get_id_tag(), e)
-
-        log.trace("Finished _find_container for job %s (no container found)", job_wrapper.get_id_tag())
-        return None
 
     def _get_job_resources(self, job_wrapper, params):
         """
