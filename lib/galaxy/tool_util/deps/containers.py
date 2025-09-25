@@ -122,6 +122,7 @@ class ContainerFinder:
 
         # Short-cut everything else and just skip checks if no container type is enabled.
         if not enabled_container_types:
+            log.trace("No enabled container types found for %s", tool_info.tool_id)
             return None
 
         def __destination_container(
@@ -152,35 +153,53 @@ class ContainerFinder:
         def container_from_description_from_dicts(
             destination_container_dicts: List[Dict[str, Any]],
         ) -> Optional[Container]:
+            log.trace("Found %d container types", len(destination_container_dicts))
             for destination_container_dict in destination_container_dicts:
                 container_description = ContainerDescription.from_dict(destination_container_dict)
                 if container_description:
+                    log.trace("Found container description for %s", container_description.identifier)
                     container = __destination_container(container_description)
                     if container:
+                        log.trace("Found container %s", container.container_name)
                         return container
+                    else:
+                        log.trace("No container found for %s", destination_container_dict)
             return None
 
         if "container_override" in destination_info:
+            log.trace("Found container override for %s", destination_info["container_override"])
             container = container_from_description_from_dicts(destination_info["container_override"])
             if container:
+                log.trace("Found container %s", container.container_name)
                 return container
+            else:
+                log.trace("No container found for %s", destination_info["container_override"])
 
         # If destination forcing Galaxy to use a particular container do it,
         # this is likely kind of a corner case. For instance if deployers
         # do not trust the containers annotated in tools.
         for container_type in CONTAINER_CLASSES.keys():
+            log.trace("Checking if the destination forces a container type")
             container_id = self.__overridden_container_id(container_type, destination_info)
             if container_id:
+                log.trace("Found container %s", container_id)
                 container = __destination_container(container_type=container_type, container_id=container_id)
                 if container:
+                    log.trace("Found container %s", container.container_name)
                     return container
+                else:
+                    log.trace("No container found for %s", container_type)
 
         # Otherwise lets see if we can find container for the tool.
+        log.trace("Checking the container registry for destination")
         container_registry = self._container_registry_for_destination(destination_info)
         container_description = container_registry.find_best_container_description(enabled_container_types, tool_info)
         container = __destination_container(container_description)
         if container:
+            log.trace("Found container %s", container.container_name)
             return container
+        else:
+            log.trace("Container not found.")
 
         # If we still don't have a container, check to see if any container
         # types define a default container id and use that.
@@ -249,8 +268,10 @@ class ContainerFinder:
         job_info: "JobInfo",
         container_description: Optional[ContainerDescription] = None,
     ) -> Optional[Container]:
+        log.trace("Searching for destination container %s", container_id)
         # TODO: ensure destination_info is dict-like
         if not self.__container_type_enabled(container_type, destination_info):
+            log.trace("Container type not enabled")
             return None
 
         # TODO: Right now this assumes all containers available when a

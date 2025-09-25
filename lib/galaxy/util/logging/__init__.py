@@ -2,18 +2,78 @@ import logging
 from typing import (
     Dict,
     List,
+    Optional,
 )
 
 TRACE = logging.DEBUG - 5
 
 log = logging.getLogger(__name__)
 
+# Global storage for configured logging levels
+_configured_levels = {}
+_original_getLogger = None
+
 
 def addTraceLoggingLevel():
     addLoggingLevel("TRACE", TRACE)
 
 
+def _enhanced_getLogger(name: Optional[str] = None) -> logging.Logger:
+    """
+    Enhanced version of logging.getLogger that automatically applies configured levels.
+    """
+    # Call the original getLogger function
+    logger = _original_getLogger(name) if _original_getLogger else logging.Logger.manager.getLogger(name)
+
+    # Apply configured levels if any match
+    if name and _configured_levels:
+        # Check for exact match first
+        if name in _configured_levels:
+            level = _configured_levels[name]
+            if level != logger.level:
+                logger.setLevel(level)
+                log.debug("Applied configured level %s to logger %s", logging.getLevelName(level), name)
+        else:
+            # Check for pattern matches (e.g., "galaxy.jobs.*" matches "galaxy.jobs.runners.gcp_batch")
+            for pattern, level in _configured_levels.items():
+                if pattern.endswith(".*") and name.startswith(pattern[:-2]):
+                    if level != logger.level:
+                        logger.setLevel(level)
+                        log.debug("Applied configured level %s to logger %s (matched pattern %s)",
+                                 logging.getLevelName(level), name, pattern)
+                    break
+
+    return logger
+
+
+def enable_dynamic_logging_levels():
+    """
+    Enable dynamic logging level application for new loggers.
+    This should be called after initial logging configuration.
+    """
+    global _original_getLogger
+    if _original_getLogger is None:  # Only patch once
+        _original_getLogger = logging.getLogger
+        logging.getLogger = _enhanced_getLogger
+        log.info("Enabled dynamic logging levels for new loggers")
+
+
 def set_logging_levels_from_config(configuration: dict):
+    global _configured_levels
+
+    # Store the configuration for future logger creation
+    _configured_levels.clear()
+    for name, level in configuration.items():
+        if type(level) == int:
+            level_name = logging.getLevelName(level)
+            level_int = level
+        else:
+            level_name = level.upper()
+            level_int = getattr(logging, level_name, logging.INFO)
+
+        _configured_levels[name] = level_int
+
+    # Apply to existing loggers (original behavior)
     all_logger_names = logging.Logger.manager.loggerDict.keys()
     settings = dict()
     for name, level in configuration.items():
@@ -23,13 +83,18 @@ def set_logging_levels_from_config(configuration: dict):
             level = level.upper()
         if name.endswith(".*"):
             pattern = name[:-2]
-            for name in all_logger_names:
-                if name.startswith(pattern):
-                    settings[name] = level
+            for logger_name in all_logger_names:
+                if logger_name.startswith(pattern):
+                    settings[logger_name] = level
         else:
             settings[name] = level
     for name, level in settings.items():
         logging.getLogger(name).setLevel(level)
+
+    # Enable dynamic logging for future loggers
+    enable_dynamic_logging_levels()
+
+    log.info("Applied logging configuration to %d existing loggers and enabled dynamic logging", len(settings))
 
 
 def _get_level_info(logger) -> Dict[str, str]:
@@ -100,6 +165,16 @@ def get_log_levels(name) -> Dict[str, Dict[str, str]]:
     return {"UNKNOWN": _get_level_info(None)}
 
 
+def get_configured_levels() -> Dict[str, str]:
+    """
+    Get the currently configured logging levels for dynamic application.
+
+    :return: Dictionary of logger patterns to level names
+    :rtype: Dict[str, str]
+    """
+    return {name: logging.getLevelName(level) for name, level in _configured_levels.items()}
+
+
 def set_log_levels(name, level) -> List[Dict[str, str]]:
     """
     Set the log level for a one or more loggers.
@@ -117,10 +192,22 @@ def set_log_levels(name, level) -> List[Dict[str, str]]:
     :return: The log level for the logger
     :rtype: LoggerLevelInfo
     """
+    global _configured_levels
+
     # if not trans.user_is_admin:
     #     log.warning("Only admins can set log level")
     #     raise AdminRequiredException()
     log.info("Setting level for logger %s to %s", name, level)
+
+    # Convert level to int if it's a string
+    if isinstance(level, str):
+        level_int = getattr(logging, level.upper(), logging.INFO)
+    else:
+        level_int = level
+
+    # Update the configured levels so future loggers get the right level
+    _configured_levels[name] = level_int
+
     result = []
     loggers = get_logger_names()
     if name.endswith(".*"):

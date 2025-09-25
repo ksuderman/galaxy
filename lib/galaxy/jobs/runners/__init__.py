@@ -3,6 +3,7 @@ Base classes for job runner plugins.
 """
 
 import datetime
+import logging
 import os
 import string
 import subprocess
@@ -56,7 +57,7 @@ from galaxy.util import (
     unicodify,
     UNKNOWN,
 )
-from galaxy.util.custom_logging import get_logger
+# from galaxy.util.custom_logging import get_logger
 from galaxy.util.monitors import Monitors
 from .state_handler_factory import build_state_handlers
 
@@ -68,7 +69,7 @@ if TYPE_CHECKING:
         MinimalJobWrapper,
     )
 
-log = get_logger(__name__)
+log = logging.getLogger(__name__)
 
 STOP_SIGNAL = object()
 
@@ -532,6 +533,7 @@ class BaseJobRunner:
         compute_job_directory: Optional[str] = None,
         compute_tmp_directory: Optional[str] = None,
     ):
+        log.trace("Trying to find the container for the job %s", job_wrapper.job_id)
         job_directory_type = "galaxy" if compute_working_directory is None else "pulsar"
         if not compute_working_directory:
             compute_working_directory = job_wrapper.tool_working_directory
@@ -570,6 +572,7 @@ class BaseJobRunner:
         destination_info = job_wrapper.job_destination.params
         container = self.app.container_finder.find_container(tool_info, destination_info, job_info)
         if container:
+            log.trace("Found the container %s for the job %s", container.container_name, job_wrapper.job_id)
             job_wrapper.set_container(container)
         return container
 

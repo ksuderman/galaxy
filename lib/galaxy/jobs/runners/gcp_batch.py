@@ -260,7 +260,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         log.trace("Starting _create_batch_job_spec for job %s", job_wrapper.get_id_tag())
 
         # Get container image from job wrapper if available, otherwise use params
-        container_image = self._get_container_image(job_wrapper, params)
+        container_image = self._get_container_image(ajs.job_wrapper, params)
         log.debug("Using container image: %s for job %s", container_image, job_wrapper.get_id_tag())
 
         # Create the execution script based on whether we use containers or not
