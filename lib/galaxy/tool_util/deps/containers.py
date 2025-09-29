@@ -118,7 +118,13 @@ class ContainerFinder:
     def find_container(
         self, tool_info: "ToolInfo", destination_info: Dict[str, Any], job_info: "JobInfo"
     ) -> Optional[Container]:
+        log.trace("ContainerFinder.find_container called for tool %s", tool_info.tool_id)
+        log.trace("Tool requirements: %s", getattr(tool_info, 'requirements', None))
+        log.trace("Destination info keys: %s", list(destination_info.keys()))
+        log.trace("Job info: %s", job_info)
+
         enabled_container_types = self._enabled_container_types(destination_info)
+        log.trace("Enabled container types: %s", enabled_container_types)
 
         # Short-cut everything else and just skip checks if no container type is enabled.
         if not enabled_container_types:
@@ -174,6 +180,8 @@ class ContainerFinder:
                 return container
             else:
                 log.trace("No container found for %s", destination_info["container_override"])
+        else:
+            log.trace("No container_override in destination_info")
 
         # If destination forcing Galaxy to use a particular container do it,
         # this is likely kind of a corner case. For instance if deployers
@@ -193,13 +201,18 @@ class ContainerFinder:
         # Otherwise lets see if we can find container for the tool.
         log.trace("Checking the container registry for destination")
         container_registry = self._container_registry_for_destination(destination_info)
+        log.trace("Using container registry: %s (type: %s)", container_registry, type(container_registry))
+        log.trace("Registry has %d resolvers", len(container_registry.container_resolvers))
+
         container_description = container_registry.find_best_container_description(enabled_container_types, tool_info)
+        log.trace("Registry returned container description: %s", container_description)
+
         container = __destination_container(container_description)
         if container:
             log.trace("Found container %s", container.container_name)
             return container
         else:
-            log.trace("Container not found.")
+            log.trace("Container not found from registry resolution.")
 
         # If we still don't have a container, check to see if any container
         # types define a default container id and use that.
@@ -396,21 +409,30 @@ class ContainerRegistry:
         resolution_cache: Optional[ResolutionCache] = None,
         session: Optional[Session] = None,
     ) -> Optional[ResolvedContainerDescription]:
+        log.trace("ContainerRegistry.resolve called for tool %s with enabled types: %s", tool_info.tool_id, enabled_container_types)
         resolution_cache = resolution_cache or self.get_resolution_cache()
+
         for i, container_resolver in enumerate(self.container_resolvers):
+            log.trace("Checking resolver %d: %s (type: %s)", i, container_resolver, type(container_resolver))
+
             if index is not None and i != index:
+                log.trace("Skipping resolver %d (index filter)", i)
                 continue
 
             if resolver_type is not None and resolver_type != container_resolver.resolver_type:
+                log.trace("Skipping resolver %d (type filter: %s != %s)", i, resolver_type, container_resolver.resolver_type)
                 continue
 
             if hasattr(container_resolver, "container_type"):
                 if container_resolver.container_type not in enabled_container_types:
+                    log.trace("Skipping resolver %d (container type %s not enabled)", i, container_resolver.container_type)
                     continue
 
             if not install and container_resolver.builds_on_resolution:
+                log.trace("Skipping resolver %d (builds on resolution but install=False)", i)
                 continue
 
+            log.trace("Calling resolver %d (%s) for tool %s", i, container_resolver, tool_info.tool_id)
             container_description = container_resolver.resolve(
                 enabled_container_types, tool_info, install=install, resolution_cache=resolution_cache, session=session
             )
@@ -418,7 +440,11 @@ class ContainerRegistry:
                 f"Checking with container resolver [{container_resolver}] found description [{container_description}]"
             )
             if container_description:
+                log.trace("Resolver %d found container description: %s", i, container_description)
                 assert container_resolver._container_type_enabled(container_description, enabled_container_types)
                 return ResolvedContainerDescription(container_resolver, container_description)
+            else:
+                log.trace("Resolver %d returned None", i)
 
+        log.trace("No container resolvers found a description for tool %s", tool_info.tool_id)
         return None

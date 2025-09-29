@@ -40,7 +40,6 @@ from galaxy.util import (
     unicodify,
 )
 from galaxy.util.config_parsers import parse_allowlist_ips
-from galaxy.util.custom_logging import LOGLV_TRACE
 from galaxy.util.dynamic import HasDynamicProperties
 from galaxy.util.facts import get_facts
 from galaxy.util.hash_util import HashFunctionNameEnum
@@ -63,6 +62,7 @@ if TYPE_CHECKING:
     from galaxy.model import User
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 
 DEFAULT_LOCALE_FORMAT = "%a %b %e %H:%M:%S %Y"
 ISO_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"

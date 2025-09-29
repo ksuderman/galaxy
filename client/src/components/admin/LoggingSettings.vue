@@ -2,6 +2,8 @@
 import { onMounted, ref, computed } from "vue";
 import axios from "axios";
 import { getAppRoot } from "@/onload/loadConfig";
+import { Toast } from "@/composables/toast";
+import { errorMessageAsString } from "@/utils/simple-error";
 
 interface LoggerInfo {
     name: string;
@@ -54,8 +56,18 @@ async function setLogLevel(loggerName: string, level: string) {
         if (response.data) {
             Object.assign(loggers.value, response.data);
         }
+
+        // Show success notification with propagation message
+        Toast.success(
+            `Log level for "${loggerName}" has been set to ${level}. Allow 1-2 minutes for changes to propagate to all handlers.`,
+            "Log Level Updated"
+        );
     } catch (err) {
         console.error("Failed to set log level:", err);
+        Toast.error(
+            `Failed to set log level for "${loggerName}": ${errorMessageAsString(err)}`,
+            "Failed to Update Log Level"
+        );
     }
 }
 

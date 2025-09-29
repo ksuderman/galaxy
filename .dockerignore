@@ -6,6 +6,7 @@
 database/
 packages/
 client/node_modules/
+config/plugins/visualizations
 test-data/
 doc/
 *.log

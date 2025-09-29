@@ -6,7 +6,7 @@ import logging
 import threading
 
 from galaxy.managers.context import ProvidesUserContext
-from galaxy.util.logging import get_log_levels
+from galaxy.util.logging import get_log_levels, get_configured_levels
 from . import (
     DependsOnTrans,
     Router,
@@ -16,6 +16,9 @@ log = logging.getLogger(__name__)
 router = Router(tags=["logging"])
 
 
+# Build number for tracking code deployment - increment when making changes
+LOGGING_API_BUILD = 8
+
 @router.cbv
 class FastApiLoggingManager:
 
@@ -23,6 +26,16 @@ class FastApiLoggingManager:
     def index(self, trans=DependsOnTrans):
         log.info("Getting all logger leverls")
         return get_log_levels(None)
+
+    @router.get("/api/logging/configured", summary="Get all configured logging levels for dynamic application", require_admin=True)
+    def get_configured(self, trans=DependsOnTrans):
+        log.info("Getting all configured logging levels")
+        return get_configured_levels()
+
+    @router.get("/api/logging/build", summary="Get the current build number for logging API")
+    def get_build(self, trans=DependsOnTrans):
+        log.info("Getting logging API build number")
+        return {"build": LOGGING_API_BUILD}
 
     @router.get(
         "/api/logging/{logger_name}",

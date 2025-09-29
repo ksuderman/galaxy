@@ -23,6 +23,7 @@ from galaxy.jobs.runners import (
     AsynchronousJobRunner,
     AsynchronousJobState,
 )
+from galaxy.jobs.runners.util.pykube_util import parse_pvc_param_line
 from galaxy.util import asbool
 
 log = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "zone": dict(map=str, default=None),
             "service_account_file": dict(map=str, default=None),
             "service_account_email": dict(map=str, default=None),
-            "machine_type": dict(map=str, default="e2-standard-4"),
+            "machine_type": dict(map=str, default="n2-standard-4"),
             "boot_disk_size_gb": dict(map=int, default=100),
             "boot_disk_type": dict(map=str, default="pd-standard"),
             "container_image": dict(map=str, default="quay.io/galaxyproject/galaxy-min:25.1"),
@@ -79,6 +80,8 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             # Object store fallback (for future use)
             "use_object_store": dict(map=bool, default=False),
             "object_store_path": dict(map=str, default=None),
+            # Persistent volume claims for CVMFS and other shared storage
+            "gcp_batch_persistent_volume_claims": dict(map=str, default=None),
         }
 
         kwargs.update({"runner_param_specs": runner_param_specs})
@@ -88,7 +91,8 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         self._init_batch_client()
 
         # Job tracking
-        self._job_states = {}  # job_id -> batch job name mapping
+        self._job_names = {}  # job_id -> batch job name mapping
+        self._job_states = {} # current job state
 
         log.info(
             "GoogleCloudBatchJobRunner initialized for project: %s",
@@ -172,7 +176,8 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
             # Store job state and add to monitoring queue
             ajs.job_id = batch_job_name
-            self._job_states[job_wrapper.job_id] = batch_job_name
+            self._job_names[job_wrapper.job_id] = batch_job_name
+            self._job_states[job_wrapper.job_id] = batch_v1.JobStatus.State.STATE_UNSPECIFIED
             self.monitor_queue.put(ajs)
 
             log.info("Successfully queued Galaxy job %s as Batch job %s", job_wrapper.get_id_tag(), batch_job_name)
@@ -212,11 +217,9 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         try:
             operation = self.batch_client.create_job(request=request)
             log.info("Submitted Batch job %s, operation: %s", job_name, operation.name)
-            log.trace("Finished _submit_batch_job for job %s", job_wrapper.get_id_tag())
             return job_name
         except Exception as e:
             log.error("Failed to create Batch job: %s", e)
-            log.trace("Finished _submit_batch_job for job %s with error", job_wrapper.get_id_tag())
             raise
 
     def _get_job_params(self, job_destination) -> Dict[str, Any]:
@@ -249,6 +252,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "use_object_store",
             "object_store_path",
             "service_account_email",
+            "gcp_batch_persistent_volume_claims",
         ]:
             params[key] = job_destination.params.get(key, self.runner_params.get(key))
 
@@ -384,18 +388,27 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
     def _get_container_image(self, job_wrapper, params):
         """Get the container image to use for this job."""
-        log.trace("Starting _get_container_image for job %s", job_wrapper.get_id_tag())
+        log.debug("Starting _get_container_image for job %s", job_wrapper.get_id_tag())
+        log.debug("GCP Batch runner - tool info: id=%s, version=%s, requirements=%s",
+                 job_wrapper.tool.id if job_wrapper.tool else "None",
+                 job_wrapper.tool.version if job_wrapper.tool else "None",
+                 job_wrapper.tool.requirements if job_wrapper.tool else "None")
+        log.debug("GCP Batch runner - destination params: %s", params)
 
         # Use Galaxy's container finder system (same approach as Kubernetes runner)
         # This takes precedence over any configuration overrides to ensure tool compatibility
+        log.debug("About to call _find_container for job %s", job_wrapper.get_id_tag())
         container = self._find_container(job_wrapper)
+        log.debug("_find_container returned: %s (type: %s)", container, type(container))
         if container:
-            log.info("Found a container")
+            log.info("Found a container: %s", container)
+            log.debug("Container attributes: %s", dir(container))
         else:
             log.info("No container found")
+            log.debug("Container is None or falsy")
         if container and hasattr(container, "container_id") and container.container_id:
             log.info("Using tool-specific container: %s for job %s (ignoring config overrides)", container.container_id, job_wrapper.get_id_tag())
-            log.trace("Finished _get_container_image for job %s (found tool container)", job_wrapper.get_id_tag())
+            log.debug("Finished _get_container_image for job %s (found tool container)", job_wrapper.get_id_tag())
             return container.container_id
 
         # Check if there's a configuration override (this might be outdated ubuntu:20.04)
@@ -410,9 +423,53 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         default_container = "ksuderman/galaxy-min:25.1-batch"
         log.info("Using improved default container: %s for job %s (config had problematic default: %s)",
                 default_container, job_wrapper.get_id_tag(), config_container)
-        log.trace("Finished _get_container_image for job %s (using improved default)", job_wrapper.get_id_tag())
+        log.debug("Finished _get_container_image for job %s (using improved default)", job_wrapper.get_id_tag())
         return default_container
 
+    def _parse_persistent_volume_claims(self, params):
+        """Parse persistent volume claims configuration and return list of volume mounts for Docker."""
+        log.debug("Starting _parse_persistent_volume_claims")
+
+        pvc_param = params.get("gcp_batch_persistent_volume_claims")
+        if not pvc_param:
+            log.debug("No persistent volume claims configured")
+            return []
+
+        volume_mounts = []
+        try:
+            # Parse comma-separated PVC mount specifications
+            for pvc_spec in pvc_param.split(","):
+                pvc_spec = pvc_spec.strip()
+                if not pvc_spec:
+                    continue
+
+                # Use the same parsing logic as Kubernetes runner
+                pvc_mount = parse_pvc_param_line(pvc_spec)
+
+                # Convert to Docker volume mount format
+                # PVC name is mapped to /mnt/<pvc_name> on the host
+                # The subPath is appended to create the full source path
+                source_path = f"/mnt/{pvc_mount['name']}"
+                if pvc_mount.get('subPath'):
+                    source_path = f"{source_path}/{pvc_mount['subPath']}"
+
+                # Create Docker volume mount specification
+                volume_mount = {
+                    'source': source_path,
+                    'target': pvc_mount['mountPath'],
+                    'read_only': pvc_mount.get('readOnly', False)
+                }
+                volume_mounts.append(volume_mount)
+
+                log.debug("Added volume mount: %s -> %s (read_only=%s)",
+                         volume_mount['source'], volume_mount['target'], volume_mount['read_only'])
+
+        except Exception as e:
+            log.error("Failed to parse persistent volume claims '%s': %s", pvc_param, e)
+            raise
+
+        log.debug("Parsed %d volume mounts from persistent volume claims", len(volume_mounts))
+        return volume_mounts
 
     def _get_job_resources(self, job_wrapper, params):
         """
@@ -537,12 +594,23 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             return int(value)
 
     def _create_container_execution_script(self, job_wrapper, ajs, params, container_image):
-        """Create a script that runs the Galaxy job inside a container with NFS mounts."""
-        log.trace("Starting _create_container_execution_script for job %s", job_wrapper.get_id_tag())
+        """Create a script that runs the Galaxy job inside a container with NFS and CVMFS mounts."""
+        log.debug("Starting _create_container_execution_script for job %s", job_wrapper.get_id_tag())
 
         nfs_mount_path = params.get("nfs_mount_path", "/mnt/nfs")
         galaxy_user_id = params.get("galaxy_user_id", 10001)
         galaxy_group_id = params.get("galaxy_group_id", 10001)
+
+        # Always enable CVMFS mount for Google Batch - it won't hurt tools that don't need it
+        # The ls check below will ensure it's mounted via autofs if needed
+        enable_cvmfs = True
+
+        # Build Docker volume arguments
+        docker_volume_args = []
+
+        # Add CVMFS mount (always enabled)
+        docker_volume_args.append('-v "/cvmfs/data.galaxyproject.org:/cvmfs/data.galaxyproject.org:ro"')
+        log.debug("Enabling CVMFS mount for job %s", job_wrapper.get_id_tag())
 
         # Create the script that will be run on the Batch VM
         script = f"""#!/bin/bash
@@ -629,21 +697,29 @@ if [ -d "{nfs_mount_path}" ]; then
         echo "  GALAXY_MEMORY_MB=$GALAXY_MEMORY_MB"
         echo ""
         
+        echo "=== Preparing Volume Mounts ==="
+
+        # Check CVMFS availability and trigger autofs mount
+        echo "=== CVMFS Verification ==="
+        # Always attempt to access CVMFS to trigger autofs mounting if configured
+        if ls /cvmfs/data.galaxyproject.org/ >/dev/null 2>&1; then
+            echo "✓ CVMFS data is accessible at /cvmfs/data.galaxyproject.org"
+            echo "CVMFS contents (first 5 entries):"
+            ls -la /cvmfs/data.galaxyproject.org/ | head -5
+        else
+            echo "✗ CVMFS data not accessible at /cvmfs/data.galaxyproject.org"
+            echo "This may indicate CVMFS is not configured or the repository is unavailable"
+            echo "Jobs requiring reference data may fail"
+        fi
+        echo ""
+
         echo "=== Starting Container Execution ==="
-        # Run the Galaxy job script inside the container with NFS mount
-        docker run --rm \\
-            --user {galaxy_user_id}:{galaxy_group_id} \\
-            -v "{nfs_mount_path}:{nfs_mount_path}:rw" \\
-            -w "$(dirname {ajs.job_file})" \\
-            -e GALAXY_SLOTS="$GALAXY_SLOTS" \\
-            -e GALAXY_MEMORY_MB="$GALAXY_MEMORY_MB" \\
-            -e HOME=/tmp \\
-            "{container_image}" \\
-            /bin/bash "{ajs.job_file}"
-        
+        # Run the Galaxy job script inside the container with all volume mounts
+        docker run --rm --user {galaxy_user_id}:{galaxy_group_id} -v "{nfs_mount_path}:{nfs_mount_path}:rw" {" ".join(docker_volume_args) if docker_volume_args else ""} -w "$(dirname {ajs.job_file})" -e GALAXY_SLOTS="$GALAXY_SLOTS" -e GALAXY_MEMORY_MB="$GALAXY_MEMORY_MB" -e HOME=/tmp "{container_image}" /bin/bash "{ajs.job_file}"
+
         echo ""
         echo "=== Container execution completed ==="
-        
+
     else
         echo "✗ NFS mount point exists but is not mounted"
         echo "Attempting manual NFS mount as fallback..."
@@ -680,12 +756,12 @@ fi
 echo "Galaxy job execution finished"
 """
 
-        log.trace("Finished _create_container_execution_script for job %s", job_wrapper.get_id_tag())
+        log.debug("Finished _create_container_execution_script for job %s", job_wrapper.get_id_tag())
         return script
 
     def _create_direct_execution_script(self, job_wrapper, ajs, params):
         """Create a script that runs the Galaxy job directly on the VM (without container)."""
-        log.trace("Starting _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
+        log.debug("Starting _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
 
         nfs_mount_path = params.get("nfs_mount_path", "/mnt/nfs")
 
@@ -742,7 +818,7 @@ fi
 echo "Galaxy job execution finished"
 """
 
-        log.trace("Finished _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
+        log.debug("Finished _create_direct_execution_script for job %s", job_wrapper.get_id_tag())
         return script
 
     @staticmethod
@@ -774,7 +850,7 @@ echo "Galaxy job execution finished"
         """Write job parameters and request object to JSON files for debugging."""
         log.trace("Starting _write_debug_files for job %s", job_wrapper.get_id_tag())
 
-        working_dir = ajs.files_dir
+        working_dir = ajs.job_wrapper.working_directory
 
         # Write job parameters to JSON
         params_file = os.path.join(working_dir, "gcp_batch_job_params.json")
@@ -879,8 +955,8 @@ echo "Galaxy job execution finished"
         log.trace("Starting check_watched_item for job %s", job_state.job_id)
 
         batch_job_name = job_state.job_id
-        log.debug("Checking status of Batch job %s", batch_job_name)
-
+        # log.debug("Checking status of Batch job %s", batch_job_name)
+        previous_state = self._job_states[job_state.job_id]
         try:
             # Get job status from Google Cloud Batch
             job_path = f"projects/{self.runner_params['project_id']}/locations/{self.runner_params['region']}/jobs/{batch_job_name}"
@@ -888,6 +964,9 @@ echo "Galaxy job execution finished"
 
             # Process job status
             job_status = batch_job.status.state
+            if job_status != previous_state:
+                log.debug("Job %s changed state from %d to %d", batch_job_name, job_status, previous_state)
+                self._job_states[job_state.job_id] = job_status
 
             if job_status == batch_v1.JobStatus.State.SUCCEEDED:
                 log.info("Batch job %s completed successfully", batch_job_name)
@@ -910,7 +989,7 @@ echo "Galaxy job execution finished"
                 batch_v1.JobStatus.State.QUEUED,
                 batch_v1.JobStatus.State.SCHEDULED,
             ]:
-                log.debug("Batch job %s is %s", batch_job_name, job_status.name)
+                log.trace("Batch job %s is %s", batch_job_name, job_status.name)
                 job_state.running = True
                 if job_status == batch_v1.JobStatus.State.RUNNING:
                     job_state.job_wrapper.change_state(model.Job.states.RUNNING)
@@ -921,7 +1000,6 @@ echo "Galaxy job execution finished"
 
             else:
                 log.warning("Batch job %s in unexpected state: %s", batch_job_name, job_status.name)
-                log.trace("Finished check_watched_item for job %s (unexpected state)", job_state.job_id)
                 return job_state  # Continue monitoring
 
         except gcp_exceptions.NotFound:
@@ -929,13 +1007,11 @@ echo "Galaxy job execution finished"
             job_state.running = False
             job_state.job_wrapper.change_state(model.Job.states.ERROR)
             self.mark_as_failed(job_state)
-            log.trace("Finished check_watched_item for job %s (not found)", job_state.job_id)
             return None
 
         except Exception as e:
             log.error("Error checking status of Batch job %s: %s", batch_job_name, e)
             # Return job_state to continue monitoring - might be temporary error
-            log.trace("Finished check_watched_item for job %s (continuing monitoring due to error)", job_state.job_id)
             return job_state
 
     def stop_job(self, job_wrapper):
@@ -943,8 +1019,8 @@ echo "Galaxy job execution finished"
         job = job_wrapper.get_job()
         log.trace("Starting stop_job for job %s", job.id)
 
-        if job.id in self._job_states:
-            batch_job_name = self._job_states[job.id]
+        if job.id in self._job_names:
+            batch_job_name = self._job_names[job.id]
 
             try:
                 job_path = f"projects/{self.runner_params['project_id']}/locations/{self.runner_params['region']}/jobs/{batch_job_name}"
@@ -956,6 +1032,7 @@ echo "Galaxy job execution finished"
 
             finally:
                 # Clean up tracking
+                del self._job_names[job.id]
                 del self._job_states[job.id]
 
         log.trace("Finished stop_job for job %s", job.id)

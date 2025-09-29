@@ -8,6 +8,7 @@ from typing import (
 TRACE = logging.DEBUG - 5
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 
 # Global storage for configured logging levels
 _configured_levels = {}
@@ -22,6 +23,7 @@ def _enhanced_getLogger(name: Optional[str] = None) -> logging.Logger:
     """
     Enhanced version of logging.getLogger that automatically applies configured levels.
     """
+    log.debug("Creating a TRACE enhanced logger for %s", name)
     # Call the original getLogger function
     logger = _original_getLogger(name) if _original_getLogger else logging.Logger.manager.getLogger(name)
 
@@ -34,15 +36,23 @@ def _enhanced_getLogger(name: Optional[str] = None) -> logging.Logger:
                 logger.setLevel(level)
                 log.debug("Applied configured level %s to logger %s", logging.getLevelName(level), name)
         else:
-            # Check for pattern matches (e.g., "galaxy.jobs.*" matches "galaxy.jobs.runners.gcp_batch")
+            # Check for pattern matches in specificity order (most specific wins)
+            # Sort patterns by specificity so more specific patterns override general ones
+            matching_patterns = []
             for pattern, level in _configured_levels.items():
                 if pattern.endswith(".*") and name.startswith(pattern[:-2]):
-                    if level != logger.level:
-                        logger.setLevel(level)
-                        log.debug("Applied configured level %s to logger %s (matched pattern %s)",
-                                 logging.getLevelName(level), name, pattern)
-                    break
+                    matching_patterns.append((pattern, level))
 
+            if matching_patterns:
+                # Sort by specificity (longer prefix = more specific)
+                matching_patterns.sort(key=lambda x: len(x[0][:-2]), reverse=True)
+                pattern, level = matching_patterns[0]  # Take the most specific match
+                if level != logger.level:
+                    logger.setLevel(level)
+                    log.debug("Applied configured level %s to logger %s (matched pattern %s)",
+                             logging.getLevelName(level), name, pattern)
+
+    log.debug("Returning logger %s with level %s", logger, logging.getLevelName(logger.level))
     return logger
 
 
@@ -59,24 +69,56 @@ def enable_dynamic_logging_levels():
 
 
 def set_logging_levels_from_config(configuration: dict):
+    log.debug("Setting the log levels from configuration")
     global _configured_levels
 
+    # Store existing API changes that shouldn't be overridden by config
+    api_changes = {}
+    if _configured_levels:
+        # Check which entries might be API changes (not from default config)
+        log.info("Found existing configured levels (%d entries), preserving API changes", len(_configured_levels))
+        api_changes = _configured_levels.copy()
+
     # Store the configuration for future logger creation
+    log.debug("Cleaing the _configured_levels dictionary")
     _configured_levels.clear()
-    for name, level in configuration.items():
+
+    # Sort configuration by specificity: general patterns first, specific ones last
+    # This ensures specific configurations override general ones
+    def get_specificity_key(item):
+        name, _ = item
+        # Count the specificity:
+        # - Patterns with .* are less specific than exact matches
+        # - Longer prefixes are more specific than shorter ones
+        # - Exact matches are most specific
+        if name.endswith(".*"):
+            # For patterns, shorter prefix = less specific (should come first)
+            return (0, len(name[:-2]))
+        else:
+            # For exact matches, longer name = more specific (should come last)
+            return (1, len(name))
+
+    sorted_config = sorted(configuration.items(), key=get_specificity_key)
+
+    for name, level in sorted_config:
         if type(level) == int:
             level_name = logging.getLevelName(level)
             level_int = level
         else:
             level_name = level.upper()
-            level_int = getattr(logging, level_name, logging.INFO)
+            if level_name == "TRACE":
+                level_int = TRACE
+            else:
+                level_int = getattr(logging, level_name, logging.INFO)
 
         _configured_levels[name] = level_int
+        log.debug("Configured logger pattern %s to level %s", name, level_name)
 
     # Apply to existing loggers (original behavior)
+    # Use the same sorted order to ensure consistent precedence
     all_logger_names = logging.Logger.manager.loggerDict.keys()
     settings = dict()
-    for name, level in configuration.items():
+    for name, level in sorted_config:
         if type(level) == int:
             level = logging.getLevelName(level)
         else:
@@ -86,10 +128,20 @@ def set_logging_levels_from_config(configuration: dict):
             for logger_name in all_logger_names:
                 if logger_name.startswith(pattern):
                     settings[logger_name] = level
+                    log.debug("Pattern %s matches existing logger %s, setting to %s", name, logger_name, level)
         else:
             settings[name] = level
+            log.debug("Exact match for existing logger %s, setting to %s", name, level)
+
     for name, level in settings.items():
         logging.getLogger(name).setLevel(level)
+
+    # Restore API changes that aren't covered by config
+    for name, level in api_changes.items():
+        if name not in _configured_levels:
+            _configured_levels[name] = level
+            logging.getLogger(name).setLevel(level)
+            log.info("Restored API change for logger %s to level %s", name, logging.getLevelName(level))
 
     # Enable dynamic logging for future loggers
     enable_dynamic_logging_levels()
@@ -172,7 +224,10 @@ def get_configured_levels() -> Dict[str, str]:
     :return: Dictionary of logger patterns to level names
     :rtype: Dict[str, str]
     """
-    return {name: logging.getLevelName(level) for name, level in _configured_levels.items()}
+    log.debug("Current _configured_levels contents: %s", _configured_levels)
+    result = {name: logging.getLevelName(level) for name, level in _configured_levels.items()}
+    log.debug("Returning configured levels: %s", result)
+    return result
 
 
 def set_log_levels(name, level) -> List[Dict[str, str]]:
@@ -201,11 +256,16 @@ def set_log_levels(name, level) -> List[Dict[str, str]]:
 
     # Convert level to int if it's a string
     if isinstance(level, str):
-        level_int = getattr(logging, level.upper(), logging.INFO)
+        level_upper = level.upper()
+        if level_upper == "TRACE":
+            level_int = TRACE
+        else:
+            level_int = getattr(logging, level_upper, logging.INFO)
     else:
         level_int = level
 
     # Update the configured levels so future loggers get the right level
+    # This maintains the configuration but may be overridden by more specific patterns later
     _configured_levels[name] = level_int
 
     result = []

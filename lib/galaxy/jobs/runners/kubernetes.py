@@ -541,7 +541,21 @@ class KubernetesJobRunner(AsynchronousJobRunner):
         Setting these variables changes the described behaviour in the job file shell script
         used to execute the tool inside the container.
         """
+        log.trace("Kubernetes runner - starting container resolution for job %s", ajs.job_wrapper.get_id_tag())
+        log.trace("Kubernetes runner - tool info: id=%s, version=%s, requirements=%s",
+                 ajs.job_wrapper.tool.id if ajs.job_wrapper.tool else "None",
+                 ajs.job_wrapper.tool.version if ajs.job_wrapper.tool else "None",
+                 ajs.job_wrapper.tool.requirements if ajs.job_wrapper.tool else "None")
+        log.trace("Kubernetes runner - runner params: %s", self.runner_params)
+
+        log.debug("Kubernetes runner - About to call _find_container for job %s", ajs.job_wrapper.get_id_tag())
         container = self._find_container(ajs.job_wrapper)
+        log.debug("Kubernetes runner - _find_container returned: %s (type: %s)", container, type(container))
+
+        if container:
+            log.trace("Kubernetes runner - Found container: %s", container.container_id)
+        else:
+            log.error("Kubernetes runner - No container found for job %s - this will cause failure", ajs.job_wrapper.get_id_tag())
 
         mounts = get_volume_mounts_for_job(
             ajs.job_wrapper,
