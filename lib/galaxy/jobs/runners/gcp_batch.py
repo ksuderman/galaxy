@@ -27,6 +27,7 @@ from galaxy.jobs.runners.util.pykube_util import parse_pvc_param_line
 from galaxy.util import asbool
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.TRACE)
 
 __all__ = ("GoogleCloudBatchJobRunner",)
 
@@ -956,6 +957,8 @@ echo "Galaxy job execution finished"
 
         batch_job_name = job_state.job_id
         # log.debug("Checking status of Batch job %s", batch_job_name)
+        if job_state.job_status not in self._job_states:
+            self._job_states[job_state.job_id] = batch_v1.JobStatus.State.STATE_UNSPECIFIED
         previous_state = self._job_states[job_state.job_id]
         try:
             # Get job status from Google Cloud Batch
