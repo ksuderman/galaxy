@@ -322,20 +322,20 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
     if not methodName:
         methodName = levelName.lower()
 
-    if hasattr(logging, levelName) or hasattr(logging, methodName) or hasattr(logging.getLoggerClass(), methodName):
-        logging.warning(
-            "Attempted to add logging level %s with level number %d and method name %s, but one or more already exist",
-            levelName,
-            levelNum,
-            methodName,
-        )
-        # traceback.print_stack()
-        return
+    # if hasattr(logging, levelName) or hasattr(logging, methodName) or hasattr(logging.getLoggerClass(), methodName):
+    #     logging.warning(
+    #         "Attempted to add logging level %s with level number %d and method name %s, but one or more already exist",
+    #         levelName,
+    #         levelNum,
+    #         methodName,
+    #     )
+    #     # traceback.print_stack()
+    #     return
 
     # TDOD: Do we really want to do this here?
-    logging.basicConfig(
-        level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d - %(message)s"
-    )
+    # logging.basicConfig(
+    #     level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d - %(message)s"
+    # )
 
     def logForLevel(self, message, *args, **kwargs):
         if self.isEnabledFor(levelNum):
@@ -344,10 +344,13 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
     def logToRoot(message, *args, **kwargs):
         logging.log(levelNum, message, *args, **kwargs)
 
-    logging.addLevelName(levelNum, levelName)
-    setattr(logging, levelName, levelNum)
-    setattr(logging.getLoggerClass(), methodName, logForLevel)
-    setattr(logging, methodName, logToRoot)
+    if not hasattr(logging, levelName):
+        logging.addLevelName(levelNum, levelName)
+        setattr(logging, levelName, levelNum)
+
+    if not hasattr(logging, methodName):
+        setattr(logging.getLoggerClass(), methodName, logForLevel)
+        setattr(logging, methodName, logToRoot)
     logging.info("Trace level logging has been enabled")
 
 

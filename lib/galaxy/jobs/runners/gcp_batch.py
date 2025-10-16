@@ -26,6 +26,8 @@ from galaxy.jobs.runners import (
 from galaxy.jobs.runners.util.pykube_util import parse_pvc_param_line
 from galaxy.util import asbool
 
+from galaxy.util.logging import addTraceLoggingLevel
+addTraceLoggingLevel()
 log = logging.getLogger(__name__)
 log.setLevel(logging.TRACE)
 
