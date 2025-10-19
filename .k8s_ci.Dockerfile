@@ -80,7 +80,7 @@ COPY Makefile *.sh $SERVER_DIR
 FROM stage1 AS server_build
 ARG SERVER_DIR
 
-RUN ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false, galaxy_additional_venv_packages: false, galaxy_virtualenv_command: '/usr/bin/python3 -m venv'}"
+RUN ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false, galaxy_additional_venv_packages: false, galaxy_virtualenv_command: virtualenv}"
 
 # Remove build artifacts + files not needed in container
 WORKDIR $SERVER_DIR
