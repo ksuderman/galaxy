@@ -51,7 +51,7 @@ RUN set -xe; \
         libc-dev \
         bzip2 \
         gcc \
-    && pip install --no-cache virtualenv ansible==11.10.0 \
+    && pip install --no-cache ansible==11.10.0 \
     && apt-get autoremove -y && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -80,7 +80,7 @@ COPY Makefile *.sh $SERVER_DIR
 FROM stage1 AS server_build
 ARG SERVER_DIR
 
-RUN ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false, galaxy_additional_venv_packages: false, galaxy_virtualenv_command: virtualenv}"
+RUN ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false, galaxy_additional_venv_packages: false}"
 
 # Remove build artifacts + files not needed in container
 WORKDIR $SERVER_DIR
