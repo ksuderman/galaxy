@@ -51,20 +51,28 @@ RUN set -xe; \
         libc-dev \
         bzip2 \
         gcc \
-    && pip install --no-cache virtualenv ansible \
+    && pip install --no-cache virtualenv ansible==11.10.0 \
     && apt-get autoremove -y && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Remove context from previous build; copy current context; run playbook
 WORKDIR /tmp/ansible
 RUN rm -rf *
-ENV LC_ALL en_US.UTF-8
 RUN git clone --depth 1 --branch $GALAXY_PLAYBOOK_BRANCH $GALAXY_PLAYBOOK_REPO galaxy-docker
 WORKDIR /tmp/ansible/galaxy-docker
 RUN ansible-galaxy install -r requirements.yml -p roles --force-with-deps
 
-# Add Galaxy source code
-COPY . $SERVER_DIR/
+# Copy just the Galaxy source code we need
+COPY client/ $SERVER_DIR/client
+COPY client-api/ $SERVER_DIR/client-api
+COPY config/ $SERVER_DIR/config
+COPY lib/ $SERVER_DIR/lib
+COPY scripts/ $SERVER_DIR/scripts
+COPY static/ $SERVER_DIR/static
+COPY templates/ $SERVER_DIR/templates
+COPY tool-data/ $SERVER_DIR/tool-data
+COPY tools/ $SERVER_DIR/tools
+COPY Makefile *.sh $SERVER_DIR
 
 #======================================================
 # Stage 2.1 - Build galaxy server
@@ -72,12 +80,11 @@ COPY . $SERVER_DIR/
 FROM stage1 AS server_build
 ARG SERVER_DIR
 
-RUN ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false}" -e galaxy_virtualenv_command=virtualenv
+RUN ansible-playbook -i localhost, playbook.yml -v -e "{galaxy_build_client: false, galaxy_additional_venv_packages: false, galaxy_virtualenv_command: virtualenv}"
 
 # Remove build artifacts + files not needed in container
 WORKDIR $SERVER_DIR
-# Save commit hash of HEAD before zapping git folder
-RUN git rev-parse HEAD > GITREVISION
+
 RUN rm -rf \
         .ci \
         .git \
@@ -95,7 +102,7 @@ RUN find . -name "node_modules" -type d -prune -exec rm -rf '{}' +
 FROM stage1 AS client_build
 ARG SERVER_DIR
 
-RUN ansible-playbook -i localhost, playbook.yml -v --tags "galaxy_build_client" -e galaxy_virtualenv_command=virtualenv
+RUN ansible-playbook -i localhost, playbook.yml -v --tags "galaxy_build_client" -e "{galaxy_additional_venv_packages: false, galaxy_virtualenv_command: virtualenv}"
 
 WORKDIR $SERVER_DIR
 RUN rm -rf \
@@ -173,6 +180,7 @@ RUN set -xe; \
       && chown $GALAXY_USER:$GALAXY_USER $ROOT_DIR -R
 
 WORKDIR $ROOT_DIR
+
 # Copy galaxy files to final image
 # The chown value MUST be hardcoded (see https://github.com/moby/moby/issues/35018)
 COPY --chown=$GALAXY_USER:$GALAXY_USER --from=server_build $ROOT_DIR .
@@ -181,7 +189,7 @@ COPY --chown=$GALAXY_USER:$GALAXY_USER --from=client_build $SERVER_DIR/static ./
 WORKDIR $SERVER_DIR
 
 # The data in version.json will be displayed in Galaxy's /api/version endpoint
-RUN printf "{\n  \"git_commit\": \"$(cat GITREVISION)\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
+RUN printf "{\n  \"git_commit\": \"$GIT_COMMIT\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
     && chown $GALAXY_USER:$GALAXY_USER version.json
 
 EXPOSE 8080
@@ -193,4 +201,4 @@ ENV GALAXY_CONFIG_CONDA_AUTO_INIT=False
 ENTRYPOINT ["tini", "--"]
 
 # [optional] to run:
-CMD galaxy
+CMD ["galaxy"]
