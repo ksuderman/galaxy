@@ -959,7 +959,7 @@ echo "Galaxy job execution finished"
 
         batch_job_name = job_state.job_id
         # log.debug("Checking status of Batch job %s", batch_job_name)
-        if job_state.job_status not in self._job_states:
+        if job_state.job_id not in self._job_states:
             self._job_states[job_state.job_id] = batch_v1.JobStatus.State.STATE_UNSPECIFIED
         previous_state = self._job_states[job_state.job_id]
         try:
