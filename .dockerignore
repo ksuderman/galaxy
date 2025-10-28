@@ -1,11 +1,4 @@
 .k8s_ci.Dockerfile
-.ci/
-.venv/
-.tox/
-.git/
-database/
-packages/
-client/node_modules/
-test-data/
-doc/
-*.log
+.venv
+database
+node_modules

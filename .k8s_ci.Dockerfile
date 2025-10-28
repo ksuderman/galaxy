@@ -51,30 +51,29 @@ RUN set -xe; \
         libc-dev \
         bzip2 \
         gcc \
-    && pip install --no-cache virtualenv ansible \
+    && pip install --no-cache virtualenv ansible==11.11.0 \
     && apt-get autoremove -y && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Remove context from previous build; copy current context; run playbook
 WORKDIR /tmp/ansible
 RUN rm -rf *
-ENV LC_ALL=en_US.UTF-8
 RUN git clone --depth 1 --branch $GALAXY_PLAYBOOK_BRANCH $GALAXY_PLAYBOOK_REPO galaxy-docker
 WORKDIR /tmp/ansible/galaxy-docker
 RUN ansible-galaxy install -r requirements.yml -p roles --force-with-deps
 
 # Add Galaxy source code
-#COPY . $SERVER_DIR/
-COPY client/ $SERVER_DIR/client
-COPY client-api/ $SERVER_DIR/client-api
-COPY config/ $SERVER_DIR/config
-COPY lib/ $SERVER_DIR/lib
-COPY scripts/ $SERVER_DIR/scripts
-COPY static/ $SERVER_DIR/static
-COPY templates/ $SERVER_DIR/templates
-COPY tool-data/ $SERVER_DIR/tool-data
-COPY tools/ $SERVER_DIR/tools
-COPY Makefile *.sh $SERVER_DIR
+COPY . $SERVER_DIR/
+#COPY client/ $SERVER_DIR/client
+#COPY client-api/ $SERVER_DIR/client-api
+#COPY config/ $SERVER_DIR/config
+#COPY lib/ $SERVER_DIR/lib
+#COPY scripts/ $SERVER_DIR/scripts
+#COPY static/ $SERVER_DIR/static
+#COPY templates/ $SERVER_DIR/templates
+#COPY tool-data/ $SERVER_DIR/tool-data
+#COPY tools/ $SERVER_DIR/tools
+#COPY Makefile *.sh $SERVER_DIR
 
 #======================================================
 # Stage 2.1 - Build galaxy server
