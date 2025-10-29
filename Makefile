@@ -5,7 +5,7 @@ IN_VENV=if [ -f "$(VENV)/bin/activate" ]; then . "$(VENV)/bin/activate"; fi;
 RELEASE_CURR:=25.1-batch-2
 # Docker image tag. Allow it to be overridden on the command line
 TAG?=$(RELEASE_CURR)
-# This is not set to galaxyproject as the Makefile should not be pusing official images
+# This is not set to galaxyproject as the Makefile should not be pushing official images
 OWNER?=ksuderman
 IMAGE?=galaxy-min
 RELEASE_UPSTREAM:=upstream
