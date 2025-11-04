@@ -51,6 +51,11 @@ const sections = computed(() => {
                     route: "/admin/data_manager",
                 },
                 {
+                    id: "admin-link-logging",
+                    title: "Logging Settings",
+                    route: "/admin/logging",
+                },
+                {
                     id: "admin-link-notifications",
                     title: "Notifications and Broadcasts",
                     route: "/admin/notifications",
