@@ -3,11 +3,6 @@ VENV?=.venv
 # Source virtualenv to execute command (darker, sphinx, twine, etc...)
 IN_VENV=if [ -f "$(VENV)/bin/activate" ]; then . "$(VENV)/bin/activate"; fi;
 RELEASE_CURR:=25.1-batch-2
-# Docker image tag. Allow it to be overridden on the command line
-TAG?=$(RELEASE_CURR)
-# This is not set to galaxyproject as the Makefile should not be pushing official images
-OWNER?=ksuderman
-IMAGE?=galaxy-min
 RELEASE_UPSTREAM:=upstream
 CONFIG_MANAGE=$(IN_VENV) python lib/galaxy/config/config_manage.py
 PROJECT_URL?=https://github.com/galaxyproject/galaxy
@@ -87,13 +82,6 @@ open-docs: docs _open-docs ## generate Sphinx HTML documentation and open in bro
 
 open-project: ## open project on github
 	$(OPEN_RESOURCE) $(PROJECT_URL)
-
-docker: ## build and push a Docker image
-	$(eval BUILD_DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ'))
-	$(eval GIT_COMMIT := $(shell git rev-parse HEAD))
-	@echo "Building $(TAG) on $(BUILD_DATE) commit $(GIT_COMMIT)"
-	docker build . -f .k8s_ci.Dockerfile --platform linux/amd64 --build-arg GIT_COMMIT=$(GIT_COMMIT) --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg IMAGE_TAG=$(TAG) -t $(OWNER)/$(IMAGE):$(TAG)
-	docker push $(OWNER)/$(IMAGE):$(TAG)
 
 tool-shed-config-validate: ## validate tool shed YAML configuration file
 	$(CONFIG_MANAGE) validate tool_shed

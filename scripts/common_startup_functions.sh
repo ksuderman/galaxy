@@ -207,7 +207,7 @@ find_server() {
 # are using Conda.
 set_conda_exe() {
     [ -n "$CONDA_EXE" ] || [ -n "$_CONDA_EXE_SET" ] && return 0
-    if python -V 2>&1 | grep -q -e 'Anaconda' -e 'Continuum Analytics' || \
+    if python3 -V 2>&1 | grep -q -e 'Anaconda' -e 'Continuum Analytics' || \
             python -c 'import sys; print(sys.version.replace("\n", " "))' 2>/dev/null | grep -q -e 'packaged by conda-forge' ; then
         CONDA_EXE=$(command -v conda)
         if [ -z "$CONDA_EXE" ]; then
@@ -241,24 +241,24 @@ set_conda_info() {
 get_conda_active_prefix() {
     set_conda_info
     printf "%s" "$__CONDA_INFO" \
-        | python -c "import json, sys; print(json.load(sys.stdin)['active_prefix'])"
+        | python3 -c "import json, sys; print(json.load(sys.stdin)['active_prefix'])"
 }
 
 get_conda_root_prefix() {
     set_conda_info
     printf "%s" "$__CONDA_INFO" \
-        | python -c "import json, sys; print(json.load(sys.stdin)['root_prefix'])"
+        | python3 -c "import json, sys; print(json.load(sys.stdin)['root_prefix'])"
 }
 
 check_conda_env() {
     # envs listed in ~/.conda/environments.txt show up in envs.txt but can't be activated by name. =/
     set_conda_info
     printf "%s" "$__CONDA_INFO" \
-        | python -c "import json, os.path, sys; info = json.load(sys.stdin); sys.exit(0 if '$1' in [os.path.basename(p) for p in info['envs'] if os.path.dirname(p) in info['envs_dirs']] else 1)"
+        | python3 -c "import json, os.path, sys; info = json.load(sys.stdin); sys.exit(0 if '$1' in [os.path.basename(p) for p in info['envs'] if os.path.dirname(p) in info['envs_dirs']] else 1)"
 }
 
 get_conda_env_path() {
     set_conda_info
     printf "%s" "$__CONDA_INFO" \
-        | python -c "import json, os.path, sys; info = json.load(sys.stdin); print([p for p in info['envs'] if os.path.basename(p) == '$1' and os.path.dirname(p) in info['envs_dirs']][0])"
+        | python3 -c "import json, os.path, sys; info = json.load(sys.stdin); print([p for p in info['envs'] if os.path.basename(p) == '$1' and os.path.dirname(p) in info['envs_dirs']][0])"
 }
