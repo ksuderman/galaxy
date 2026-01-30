@@ -51,6 +51,7 @@ RUN set -xe; \
         libc-dev \
         bzip2 \
         gcc \
+        nodejs \
     && pip install --no-cache virtualenv ansible==11.11.0 \
     && apt-get autoremove -y && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/*
@@ -94,6 +95,11 @@ RUN find . -name "node_modules" -type d -prune -exec rm -rf '{}' +
 #======================================================
 FROM stage1 AS client_build
 ARG SERVER_DIR
+
+# Workaround for corepack signature verification failure due to pnpm key rotation
+# See: https://github.com/nodejs/corepack/issues/612
+#ENV COREPACK_INTEGRITY_KEYS=0
+RUN virtualenv $SERVER_DIR/.venv
 
 RUN ansible-playbook -i localhost, playbook.yml -v --tags "galaxy_build_client" -e galaxy_virtualenv_command=virtualenv
 
