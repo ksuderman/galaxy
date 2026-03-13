@@ -16,6 +16,7 @@ DEFAULT_CVMFS_DOCKER_VOLUME = (
     '-v "/cvmfs/data.galaxyproject.org:/cvmfs/data.galaxyproject.org:ro" '
     '-v "/cvmfs/cloud.galaxyproject.org:/cvmfs/cloud.galaxyproject.org:ro"'
 )
+DEFAULT_GCS_MOUNT_PATH = "/galaxy/server/database"
 
 
 def parse_volume_spec(volume_spec):

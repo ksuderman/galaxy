@@ -93,6 +93,7 @@ genai-prices==0.0.55
 google-api-core==2.30.0
 google-auth==2.49.0
 google-cloud-batch==0.20.0
+google-cloud-storage==2.19.0
 google-genai==1.66.0
 googleapis-common-protos==1.73.0
 gravity==1.2.0

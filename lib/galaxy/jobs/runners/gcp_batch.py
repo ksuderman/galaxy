@@ -27,11 +27,14 @@ from galaxy.jobs.runners.util.gcp_batch import (
     convert_cpu_to_milli,
     convert_memory_to_mib,
     DEFAULT_CVMFS_DOCKER_VOLUME,
+    DEFAULT_GCS_MOUNT_PATH,
     DEFAULT_MAX_RUN_DURATION,
     DEFAULT_MEMORY_MIB,
     DEFAULT_NFS_MOUNT_PATH,
     DEFAULT_NFS_PATH,
     DIRECT_SCRIPT_TEMPLATE,
+    GCS_CONTAINER_SCRIPT_TEMPLATE,
+    GCS_DIRECT_SCRIPT_TEMPLATE,
     parse_docker_volumes_param,
     parse_volumes_param,
     resolve_max_run_duration,
@@ -94,9 +97,10 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "custom_vm_image": dict(map=str, default=None),
             # Job cleanup: if true, delete GCP Batch jobs after Galaxy marks them complete
             "delete_completed_jobs": dict(map=bool, default=True),
-            # Object store fallback (for future use)
+            # GCS object store integration
             "use_object_store": dict(map=bool, default=False),
-            "object_store_path": dict(map=str, default=None),
+            "gcs_bucket_name": dict(map=str, default=None),
+            "gcs_mount_path": dict(map=str, default=DEFAULT_GCS_MOUNT_PATH),
         }
 
         kwargs.update({"runner_param_specs": runner_param_specs})
@@ -131,6 +135,19 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
                 self.runner_params["project_id"] = project
             else:
                 raise ValueError("Google Cloud project ID not specified and could not be determined from credentials")
+
+        # Initialize GCS storage client if object store mode is enabled
+        if self.runner_params.get("use_object_store"):
+            try:
+                from google.cloud import storage
+
+                self.storage_client = storage.Client(credentials=credentials)
+                log.info("Google Cloud Storage client initialized for object store mode")
+            except Exception as e:
+                log.error("Failed to initialize Google Cloud Storage client: %s", e)
+                raise
+        else:
+            self.storage_client = None
 
         log.info("Google Cloud Batch client initialized successfully")
 
@@ -172,6 +189,16 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             log.error("Failed to write job script for job %s: %s", job_wrapper.get_id_tag(), e)
             job_wrapper.fail("Failed to write job script")
             return
+
+        # Stage job files to GCS if object store mode is enabled
+        params = self._get_job_params(job_wrapper.job_destination)
+        if params.get("use_object_store") and params.get("gcs_bucket_name"):
+            try:
+                self._stage_job_to_gcs(job_wrapper, ajs, params)
+            except Exception as e:
+                log.error("Failed to stage job %s files to GCS: %s", job_wrapper.get_id_tag(), e)
+                job_wrapper.fail(f"Failed to stage job files to GCS: {e}")
+                return
 
         try:
             # Submit job to Google Cloud Batch
@@ -250,7 +277,8 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "galaxy_group_id",
             "custom_vm_image",
             "use_object_store",
-            "object_store_path",
+            "gcs_bucket_name",
+            "gcs_mount_path",
             "service_account_email",
         ]:
             params[key] = job_destination.params.get(key, self.runner_params.get(key))
@@ -307,26 +335,44 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             max_run_duration,
         )
 
-        # Configure NFS volumes from gcp_batch_volumes parameter
+        # Configure volumes — GCS bucket or NFS volumes
+        use_gcs = params.get("use_object_store") and params.get("gcs_bucket_name")
+        if use_gcs:
+            # Mount GCS bucket via GCP Batch's native gcsfuse support
+            gcs_volume = batch_v1.Volume()
+            gcs_volume.gcs = batch_v1.GCS()
+            gcs_volume.gcs.remote_path = params["gcs_bucket_name"]
+            gcs_volume.mount_path = params.get("gcs_mount_path", DEFAULT_GCS_MOUNT_PATH)
+            batch_volumes = [gcs_volume]
+            log.debug(
+                "Configured GCS volume: gs://%s -> %s for job %s",
+                params["gcs_bucket_name"],
+                gcs_volume.mount_path,
+                job_wrapper.get_id_tag(),
+            )
+        else:
+            batch_volumes = []
+
+        # Add any additional NFS volumes from gcp_batch_volumes parameter
         volumes_param = params.get("gcp_batch_volumes")
         parsed_volumes = parse_volumes_param(volumes_param) if volumes_param else []
 
-        if parsed_volumes:
-            batch_volumes = []
-            for vol in parsed_volumes:
-                volume = batch_v1.Volume()
-                volume.nfs = batch_v1.NFS()
-                volume.nfs.server = vol["server"]
-                volume.nfs.remote_path = vol["remote_path"]
-                volume.mount_path = vol["mount_path"]
-                batch_volumes.append(volume)
-                log.debug(
-                    "Configured NFS volume: %s:%s -> %s for job %s",
-                    vol["server"],
-                    vol["remote_path"],
-                    vol["mount_path"],
-                    job_wrapper.get_id_tag(),
-                )
+        for vol in parsed_volumes:
+            volume = batch_v1.Volume()
+            volume.nfs = batch_v1.NFS()
+            volume.nfs.server = vol["server"]
+            volume.nfs.remote_path = vol["remote_path"]
+            volume.mount_path = vol["mount_path"]
+            batch_volumes.append(volume)
+            log.debug(
+                "Configured NFS volume: %s:%s -> %s for job %s",
+                vol["server"],
+                vol["remote_path"],
+                vol["mount_path"],
+                job_wrapper.get_id_tag(),
+            )
+
+        if batch_volumes:
             task_spec.volumes = batch_volumes
 
         # Create task group
@@ -337,7 +383,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         # Create allocation policy
         allocation_policy = batch_v1.AllocationPolicy()
 
-        # Configure network for NFS access (required when using NFS volumes)
+        # Configure network for NFS access (required when using NFS volumes, not needed for GCS-only)
         if parsed_volumes:
             network_interface = batch_v1.AllocationPolicy.NetworkInterface()
             network_interface.network = f"global/networks/{params.get('network', 'default')}"
@@ -519,21 +565,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
     def _create_container_execution_script(self, job_wrapper, ajs, params, container_image, cpu_milli, memory_mib):
         """Create a script that runs the Galaxy job inside a container with volume mounts."""
-        # Parse volumes from gcp_batch_volumes parameter
-        volumes_param = params.get("gcp_batch_volumes")
-        parsed_volumes = parse_volumes_param(volumes_param) if volumes_param else []
-
-        # Get the primary NFS volume (first one) for script template
-        if parsed_volumes:
-            primary_volume = parsed_volumes[0]
-            nfs_server = primary_volume["server"]
-            nfs_path = primary_volume["remote_path"]
-            nfs_mount_path = primary_volume["mount_path"]
-        else:
-            # Fallback defaults if no volumes configured
-            nfs_server = "127.0.0.1"
-            nfs_path = DEFAULT_NFS_PATH
-            nfs_mount_path = DEFAULT_NFS_MOUNT_PATH
+        use_gcs = params.get("use_object_store") and params.get("gcs_bucket_name")
 
         # Build Docker volume arguments from docker_extra_volumes parameter
         docker_volumes_param = params.get("docker_extra_volumes")
@@ -556,47 +588,144 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         # Compute galaxy_slots from allocated CPU (at least 1 slot)
         galaxy_slots = max(1, int(cpu_milli / 1000))
 
-        template_params = {
-            "job_id_tag": job_wrapper.get_id_tag(),
-            "tool_id": job_wrapper.tool.id if job_wrapper.tool else "unknown",
-            "container_image": container_image,
-            "nfs_server": nfs_server,
-            "nfs_path": nfs_path,
-            "nfs_mount_path": nfs_mount_path,
-            "job_file": ajs.job_file,
-            "galaxy_slots": galaxy_slots,
-            "galaxy_memory_mb": memory_mib,
-            "docker_user_flag": docker_user_flag,
-            "docker_volume_args": docker_volume_args,
-        }
+        if use_gcs:
+            template_params = {
+                "job_id_tag": job_wrapper.get_id_tag(),
+                "tool_id": job_wrapper.tool.id if job_wrapper.tool else "unknown",
+                "container_image": container_image,
+                "gcs_mount_path": params.get("gcs_mount_path", DEFAULT_GCS_MOUNT_PATH),
+                "job_file": ajs.job_file,
+                "galaxy_slots": galaxy_slots,
+                "galaxy_memory_mb": memory_mib,
+                "docker_user_flag": docker_user_flag,
+                "docker_volume_args": docker_volume_args,
+            }
+            return GCS_CONTAINER_SCRIPT_TEMPLATE.substitute(template_params)
+        else:
+            # NFS mode — parse volumes from gcp_batch_volumes parameter
+            volumes_param = params.get("gcp_batch_volumes")
+            parsed_volumes = parse_volumes_param(volumes_param) if volumes_param else []
 
-        return CONTAINER_SCRIPT_TEMPLATE.substitute(template_params)
+            # Get the primary NFS volume (first one) for script template
+            if parsed_volumes:
+                primary_volume = parsed_volumes[0]
+                nfs_server = primary_volume["server"]
+                nfs_path = primary_volume["remote_path"]
+                nfs_mount_path = primary_volume["mount_path"]
+            else:
+                # Fallback defaults if no volumes configured
+                nfs_server = "127.0.0.1"
+                nfs_path = DEFAULT_NFS_PATH
+                nfs_mount_path = DEFAULT_NFS_MOUNT_PATH
+
+            template_params = {
+                "job_id_tag": job_wrapper.get_id_tag(),
+                "tool_id": job_wrapper.tool.id if job_wrapper.tool else "unknown",
+                "container_image": container_image,
+                "nfs_server": nfs_server,
+                "nfs_path": nfs_path,
+                "nfs_mount_path": nfs_mount_path,
+                "job_file": ajs.job_file,
+                "galaxy_slots": galaxy_slots,
+                "galaxy_memory_mb": memory_mib,
+                "docker_user_flag": docker_user_flag,
+                "docker_volume_args": docker_volume_args,
+            }
+            return CONTAINER_SCRIPT_TEMPLATE.substitute(template_params)
 
     def _create_direct_execution_script(self, job_wrapper, ajs, params, cpu_milli, memory_mib):
         """Create a script that runs the Galaxy job directly on the VM (without container)."""
-        # Parse volumes from gcp_batch_volumes parameter
-        volumes_param = params.get("gcp_batch_volumes")
-        parsed_volumes = parse_volumes_param(volumes_param) if volumes_param else []
-
-        # Get the primary NFS mount path (first volume) for script template
-        if parsed_volumes:
-            nfs_mount_path = parsed_volumes[0]["mount_path"]
-        else:
-            nfs_mount_path = DEFAULT_NFS_MOUNT_PATH
+        use_gcs = params.get("use_object_store") and params.get("gcs_bucket_name")
 
         # Compute galaxy_slots from allocated CPU (at least 1 slot)
         galaxy_slots = max(1, int(cpu_milli / 1000))
 
-        template_params = {
-            "job_id_tag": job_wrapper.get_id_tag(),
-            "tool_id": job_wrapper.tool.id if job_wrapper.tool else "unknown",
-            "nfs_mount_path": nfs_mount_path,
-            "job_file": ajs.job_file,
-            "galaxy_slots": galaxy_slots,
-            "galaxy_memory_mb": memory_mib,
-        }
+        if use_gcs:
+            template_params = {
+                "job_id_tag": job_wrapper.get_id_tag(),
+                "tool_id": job_wrapper.tool.id if job_wrapper.tool else "unknown",
+                "gcs_mount_path": params.get("gcs_mount_path", DEFAULT_GCS_MOUNT_PATH),
+                "job_file": ajs.job_file,
+                "galaxy_slots": galaxy_slots,
+                "galaxy_memory_mb": memory_mib,
+            }
+            return GCS_DIRECT_SCRIPT_TEMPLATE.substitute(template_params)
+        else:
+            # NFS mode
+            volumes_param = params.get("gcp_batch_volumes")
+            parsed_volumes = parse_volumes_param(volumes_param) if volumes_param else []
 
-        return DIRECT_SCRIPT_TEMPLATE.substitute(template_params)
+            if parsed_volumes:
+                nfs_mount_path = parsed_volumes[0]["mount_path"]
+            else:
+                nfs_mount_path = DEFAULT_NFS_MOUNT_PATH
+
+            template_params = {
+                "job_id_tag": job_wrapper.get_id_tag(),
+                "tool_id": job_wrapper.tool.id if job_wrapper.tool else "unknown",
+                "nfs_mount_path": nfs_mount_path,
+                "job_file": ajs.job_file,
+                "galaxy_slots": galaxy_slots,
+                "galaxy_memory_mb": memory_mib,
+            }
+            return DIRECT_SCRIPT_TEMPLATE.substitute(template_params)
+
+    def _stage_job_to_gcs(self, job_wrapper, ajs, params):
+        """Upload job working directory files to GCS for Batch VM access."""
+        bucket_name = params["gcs_bucket_name"]
+        mount_path = params.get("gcs_mount_path", DEFAULT_GCS_MOUNT_PATH)
+
+        bucket = self.storage_client.bucket(bucket_name)
+
+        files_to_upload = [ajs.job_file, ajs.output_file, ajs.error_file, ajs.exit_code_file]
+        for local_path in files_to_upload:
+            if os.path.exists(local_path):
+                # Map local path to bucket key: strip mount_path prefix
+                blob_name = os.path.relpath(local_path, mount_path)
+                blob = bucket.blob(blob_name)
+                blob.upload_from_filename(local_path)
+                log.debug(
+                    "Staged %s -> gs://%s/%s for job %s",
+                    local_path,
+                    bucket_name,
+                    blob_name,
+                    job_wrapper.get_id_tag(),
+                )
+
+        log.info("Staged job files to GCS for job %s", job_wrapper.get_id_tag())
+
+    def _retrieve_job_from_gcs_if_enabled(self, job_state):
+        """Download job result files from GCS if object store mode is enabled."""
+        params = self._get_job_params(job_state.job_wrapper.job_destination)
+        if not (params.get("use_object_store") and params.get("gcs_bucket_name")):
+            return
+
+        bucket_name = params["gcs_bucket_name"]
+        mount_path = params.get("gcs_mount_path", DEFAULT_GCS_MOUNT_PATH)
+
+        bucket = self.storage_client.bucket(bucket_name)
+
+        files_to_download = [job_state.output_file, job_state.error_file, job_state.exit_code_file]
+        for local_path in files_to_download:
+            blob_name = os.path.relpath(local_path, mount_path)
+            blob = bucket.blob(blob_name)
+            try:
+                blob.download_to_filename(local_path)
+                log.debug(
+                    "Retrieved gs://%s/%s -> %s for job %s",
+                    bucket_name,
+                    blob_name,
+                    local_path,
+                    job_state.job_id,
+                )
+            except Exception as e:
+                log.warning(
+                    "Failed to retrieve gs://%s/%s for job %s: %s",
+                    bucket_name,
+                    blob_name,
+                    job_state.job_id,
+                    e,
+                )
 
     def _write_debug_files(self, job_wrapper, ajs, params, request, job_name):
         """Write job parameters and request object to JSON files for debugging."""
@@ -718,6 +847,8 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
             if job_status == batch_v1.JobStatus.State.SUCCEEDED:
                 log.info("Batch job %s completed successfully", batch_job_name)
+                # Retrieve job results from GCS if object store mode is enabled
+                self._retrieve_job_from_gcs_if_enabled(job_state)
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.OK)
                 self.mark_as_finished(job_state)
@@ -726,6 +857,8 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
             elif job_status == batch_v1.JobStatus.State.FAILED:
                 log.warning("Batch job %s failed", batch_job_name)
+                # Retrieve any partial results from GCS if object store mode is enabled
+                self._retrieve_job_from_gcs_if_enabled(job_state)
                 job_state.running = False
                 job_state.job_wrapper.change_state(model.Job.states.ERROR)
                 self.mark_as_failed(job_state)

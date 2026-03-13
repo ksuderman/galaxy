@@ -12,6 +12,7 @@ from .helpers import (
     DEFAULT_CVMFS_DOCKER_VOLUME,
     DEFAULT_MAX_RUN_DURATION,
     DEFAULT_MEMORY_MIB,
+    DEFAULT_GCS_MOUNT_PATH,
     DEFAULT_NFS_MOUNT_PATH,
     DEFAULT_NFS_PATH,
     parse_docker_volumes_param,
@@ -23,16 +24,21 @@ from .helpers import (
 
 CONTAINER_SCRIPT_TEMPLATE = Template(resource_string(__name__, "container_script.sh"))
 DIRECT_SCRIPT_TEMPLATE = Template(resource_string(__name__, "direct_script.sh"))
+GCS_CONTAINER_SCRIPT_TEMPLATE = Template(resource_string(__name__, "gcs_container_script.sh"))
+GCS_DIRECT_SCRIPT_TEMPLATE = Template(resource_string(__name__, "gcs_direct_script.sh"))
 
 __all__ = (
     "CONTAINER_SCRIPT_TEMPLATE",
     "DEFAULT_CPU_MILLI",
     "DEFAULT_CVMFS_DOCKER_VOLUME",
+    "DEFAULT_GCS_MOUNT_PATH",
     "DEFAULT_MAX_RUN_DURATION",
     "DEFAULT_MEMORY_MIB",
     "DEFAULT_NFS_MOUNT_PATH",
     "DEFAULT_NFS_PATH",
     "DIRECT_SCRIPT_TEMPLATE",
+    "GCS_CONTAINER_SCRIPT_TEMPLATE",
+    "GCS_DIRECT_SCRIPT_TEMPLATE",
     "compute_machine_type",
     "convert_cpu_to_milli",
     "convert_memory_to_mib",
