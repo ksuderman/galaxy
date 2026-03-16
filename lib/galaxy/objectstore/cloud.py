@@ -17,6 +17,47 @@ try:
         ProviderList,
     )
     from cloudbridge.interfaces.exceptions import InvalidNameException
+
+    # Monkey-patch CloudBridge GCPResources to handle GCP API discovery docs
+    # that contain URI template syntax (e.g., {+parentName}) incompatible with
+    # Python's string.Template. Without this patch, CloudBridge crashes during
+    # provider initialization when iterating over all compute API resources.
+    import cloudbridge.providers.gcp.provider as _gcp_provider
+
+    _orig_gcp_resources_init = _gcp_provider.GCPResources.__init__
+
+    def _patched_gcp_resources_init(self, connection, **kwargs):
+        import re
+        from string import Template
+
+        self._connection = connection
+        self._parameter_defaults = kwargs
+        desc = connection._resourceDesc
+        self.RESOURCE_REGEX = re.compile(
+            r"(https://.*\.googleapis\.com/{0})(.*)".format(desc["servicePath"])
+        )
+        self._resources = {}
+        for resource, resource_desc in desc["resources"].items():
+            methods = resource_desc.get("methods", {})
+            if not methods.get("get"):
+                continue
+            method = methods["get"]
+            parameters = method["parameterOrder"]
+            try:
+                template = Template("${".join(method["path"].split("{")))
+                mapping = {}
+                for parameter in parameters:
+                    parameter_desc = method["parameters"][parameter]
+                    if "pattern" in parameter_desc:
+                        mapping[parameter] = "(%s)" % parameter_desc["pattern"]
+                    else:
+                        mapping[parameter] = "([^/]+)"
+                pattern = template.substitute(**mapping)
+            except (ValueError, KeyError):
+                continue
+            self._resources[resource] = {"parameters": parameters, "pattern": re.compile(pattern)}
+
+    _gcp_provider.GCPResources.__init__ = _patched_gcp_resources_init
 except ImportError:
     CloudProviderFactory = None
     ProviderList = None
