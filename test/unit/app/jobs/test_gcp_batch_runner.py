@@ -1,12 +1,23 @@
 """Unit tests for Google Cloud Batch job runner utility methods."""
 
-import pytest
+from types import SimpleNamespace
+from unittest import mock
 
+import pytest
+from google.api_core import exceptions as gcp_exceptions
+from google.cloud import batch_v1
+
+from galaxy import model
+from galaxy.jobs.runners.gcp_batch import GoogleCloudBatchJobRunner
 from galaxy.jobs.runners.util.gcp_batch import (
+    compute_machine_type,
     convert_cpu_to_milli,
     convert_duration_to_seconds,
     convert_memory_to_mib,
+    DEFAULT_CVMFS_DOCKER_VOLUME,
     DEFAULT_MAX_RUN_DURATION,
+    DEFAULT_MEMORY_MIB,
+    DEFAULT_NFS_MOUNT_PATH,
     parse_docker_volumes_param,
     parse_volume_spec,
     parse_volumes_param,
@@ -307,3 +318,296 @@ class TestResolveMaxRunDuration:
             resource_params={"walltime": ""},
         )
         assert result == "7200s"
+
+
+# ---------------------------------------------------------------------------
+# Tier 1: pure / near-pure logic
+# ---------------------------------------------------------------------------
+
+
+class TestComputeMachineType:
+    """Tests for compute_machine_type variant selection and size snapping."""
+
+    @pytest.mark.parametrize(
+        "cpu_milli,memory_mib,expected",
+        [
+            (1000, 2048, "n2-highcpu-4"),  # 2.0 GB/vCPU ratio -> highcpu, snaps up to size 4
+            (500, 512, "n2-highcpu-2"),  # tiny job -> smallest valid size
+            (4000, 16384, "n2-standard-4"),  # 4.0 GB/vCPU -> standard
+            (2000, 12288, "n2-standard-4"),  # ratio exactly 6.0 -> standard (boundary)
+            (2000, 13312, "n2-highmem-2"),  # ratio 6.5 (just over 6) -> highmem
+            (2000, 32768, "n2-highmem-4"),  # memory-heavy -> highmem
+            (200000, 2048, "n2-highcpu-128"),  # exceeds largest size -> capped at 128
+        ],
+    )
+    def test_compute_machine_type(self, cpu_milli, memory_mib, expected):
+        assert compute_machine_type(cpu_milli, memory_mib) == expected
+
+    def test_custom_machine_family(self):
+        assert compute_machine_type(4000, 16384, machine_type_family="n1") == "n1-standard-4"
+
+
+class TestConvertMemoryToMibUnitBranches:
+    """Coverage for the memory unit branches not exercised by TestConvertMemoryToMib."""
+
+    @pytest.mark.parametrize(
+        "input_value,expected",
+        [
+            ("1024kib", 1),  # KiB -> MiB (value / 1024)
+            ("2048ki", 2),
+            ("1024mb", 1000),  # decimal MB -> MiB
+            ("1000m", 976),
+            ("1048576kb", 1000),  # decimal KB -> MiB
+            ("5xyz", 5),  # unknown unit -> treated as MiB
+        ],
+    )
+    def test_unit_conversions(self, input_value, expected):
+        assert convert_memory_to_mib(input_value) == expected
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="GB/G branch is off by ~1000x (divides bytes by 1024^2 without scaling GB to bytes); "
+        "e.g. '1gb' returns 0 instead of ~953 MiB. Remove this xfail when helpers.py is fixed.",
+    )
+    @pytest.mark.parametrize("input_value,expected", [("1gb", 953), ("4gb", 3814)])
+    def test_gb_branch_should_convert_decimal_gb(self, input_value, expected):
+        assert convert_memory_to_mib(input_value) == expected
+
+
+def _bare_runner():
+    """A runner instance with __init__ skipped (no GCP client).
+
+    The resource/script methods under test read only their arguments, not the
+    live Batch client, so a bare instance is sufficient.
+    """
+    return object.__new__(GoogleCloudBatchJobRunner)
+
+
+def _destination(params=None):
+    return SimpleNamespace(params=params or {})
+
+
+class TestGetCpuMilli:
+    """Tests for _get_cpu_milli priority resolution."""
+
+    def test_requests_cpu_has_highest_priority(self):
+        runner = _bare_runner()
+        dest = _destination({"requests_cpu": "2", "limits_cpu": "8", "cores": "16"})
+        assert runner._get_cpu_milli(dest, {"vcpu": 1.0}, {"processors": 32}) == 2000
+
+    def test_limits_cpu_used_when_no_requests(self):
+        runner = _bare_runner()
+        dest = _destination({"limits_cpu": "500m"})
+        assert runner._get_cpu_milli(dest, {}, {}) == 500
+
+    def test_resource_processors_over_destination_cores(self):
+        runner = _bare_runner()
+        dest = _destination({"cores": "16"})
+        assert runner._get_cpu_milli(dest, {}, {"processors": 4}) == 4000
+
+    def test_destination_cores(self):
+        runner = _bare_runner()
+        dest = _destination({"cores": "3"})
+        assert runner._get_cpu_milli(dest, {}, {}) == 3000
+
+    def test_default_vcpu(self):
+        runner = _bare_runner()
+        assert runner._get_cpu_milli(_destination(), {"vcpu": 2.5}, {}) == 2500
+
+    def test_default_vcpu_falls_back_to_one(self):
+        runner = _bare_runner()
+        assert runner._get_cpu_milli(_destination(), {}, {}) == 1000
+
+
+class TestGetMemoryMib:
+    """Tests for _get_memory_mib priority resolution."""
+
+    def test_requests_memory_has_highest_priority(self):
+        runner = _bare_runner()
+        dest = _destination({"requests_memory": "2Gi", "limits_memory": "8Gi", "mem": "64"})
+        assert runner._get_memory_mib(dest, {"memory_mib": 512}, {"mem": 128}) == 2048
+
+    def test_limits_memory_used_when_no_requests(self):
+        runner = _bare_runner()
+        dest = _destination({"limits_memory": "512Mi"})
+        assert runner._get_memory_mib(dest, {}, {}) == 512
+
+    def test_resource_mem_gb_over_destination_mem(self):
+        runner = _bare_runner()
+        dest = _destination({"mem": "64"})
+        assert runner._get_memory_mib(dest, {}, {"mem": 4}) == 4096  # 4 GB -> MiB
+
+    def test_destination_mem_gb(self):
+        runner = _bare_runner()
+        dest = _destination({"mem": "2"})
+        assert runner._get_memory_mib(dest, {}, {}) == 2048  # 2 GB -> MiB
+
+    def test_default_memory_mib(self):
+        runner = _bare_runner()
+        assert runner._get_memory_mib(_destination(), {"memory_mib": 4096}, {}) == 4096
+
+    def test_default_memory_falls_back_to_constant(self):
+        runner = _bare_runner()
+        assert runner._get_memory_mib(_destination(), {}, {}) == DEFAULT_MEMORY_MIB
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: methods needing lightweight fakes / mocks
+# ---------------------------------------------------------------------------
+
+
+def _job_wrapper(tool_id="cat1", id_tag="42"):
+    return SimpleNamespace(get_id_tag=lambda: id_tag, tool=SimpleNamespace(id=tool_id))
+
+
+class TestCreateContainerExecutionScript:
+    """Tests for the container execution script builder."""
+
+    def test_docker_user_flag_user_and_group(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/data/jobs/galaxy_42.sh")
+        params = {"galaxy_user_id": "1000", "galaxy_group_id": "1000"}
+        script = runner._create_container_execution_script(_job_wrapper(), ajs, params, "busybox:latest", 4000, 8192)
+        assert "--user 1000:1000" in script
+        assert "export GALAXY_SLOTS=4" in script
+        assert "busybox:latest" in script
+
+    def test_docker_user_flag_user_only(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        script = runner._create_container_execution_script(
+            _job_wrapper(), ajs, {"galaxy_user_id": "1000"}, "img", 1000, 1024
+        )
+        assert "--user 1000" in script
+        assert "--user 1000:" not in script
+
+    def test_no_user_flag_when_unset(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        script = runner._create_container_execution_script(_job_wrapper(), ajs, {}, "img", 1000, 1024)
+        assert "--user" not in script
+
+    def test_cvmfs_default_volume_when_no_extra_volumes(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        script = runner._create_container_execution_script(_job_wrapper(), ajs, {}, "img", 1000, 1024)
+        assert DEFAULT_CVMFS_DOCKER_VOLUME in script
+
+    def test_nfs_fallback_when_no_volumes(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        script = runner._create_container_execution_script(_job_wrapper(), ajs, {}, "img", 1000, 1024)
+        assert "127.0.0.1" in script  # default nfs_server fallback
+        assert DEFAULT_NFS_MOUNT_PATH in script
+
+    def test_galaxy_slots_minimum_one(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        script = runner._create_container_execution_script(_job_wrapper(), ajs, {}, "img", 500, 1024)
+        assert "export GALAXY_SLOTS=1" in script  # max(1, 500 // 1000) == 1
+
+    def test_parsed_volume_used(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        params = {"gcp_batch_volumes": "10.0.0.1:/galaxy:/mnt/nfs"}
+        script = runner._create_container_execution_script(_job_wrapper(), ajs, params, "img", 1000, 1024)
+        assert "10.0.0.1" in script
+        assert "/mnt/nfs" in script
+
+
+class TestCreateDirectExecutionScript:
+    """Tests for the direct (no container) execution script builder."""
+
+    def test_galaxy_slots_and_memory(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        script = runner._create_direct_execution_script(_job_wrapper(), ajs, {}, 8000, 4096)
+        assert "export GALAXY_SLOTS=8" in script
+        assert "export GALAXY_MEMORY_MB=4096" in script
+
+    def test_nfs_mount_fallback(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        script = runner._create_direct_execution_script(_job_wrapper(), ajs, {}, 1000, 1024)
+        assert DEFAULT_NFS_MOUNT_PATH in script
+
+    def test_parsed_volume_mount_used(self):
+        runner = _bare_runner()
+        ajs = SimpleNamespace(job_file="/j.sh")
+        params = {"gcp_batch_volumes": "srv:/exports:/custom/mount"}
+        script = runner._create_direct_execution_script(_job_wrapper(), ajs, params, 1000, 1024)
+        assert "/custom/mount" in script
+
+
+def _watched_runner():
+    runner = _bare_runner()
+    runner.runner_params = {"project_id": "proj", "region": "us-central1"}
+    runner.batch_client = mock.Mock()
+    runner.mark_as_finished = mock.Mock()
+    runner.mark_as_failed = mock.Mock()
+    return runner
+
+
+def _job_state():
+    return SimpleNamespace(job_id="batch-job-1", running=None, job_wrapper=mock.Mock())
+
+
+def _batch_job_with_state(state):
+    job = mock.Mock()
+    job.status.state = state
+    return job
+
+
+class TestCheckWatchedItem:
+    """Tests for the Batch-state -> Galaxy-state mapping in check_watched_item."""
+
+    def test_succeeded_marks_finished_and_stops(self):
+        runner = _watched_runner()
+        runner.batch_client.get_job.return_value = _batch_job_with_state(batch_v1.JobStatus.State.SUCCEEDED)
+        js = _job_state()
+        assert runner.check_watched_item(js) is None
+        assert js.running is False
+        js.job_wrapper.change_state.assert_called_once_with(model.Job.states.OK)
+        runner.mark_as_finished.assert_called_once_with(js)
+
+    def test_failed_marks_failed_and_stops(self):
+        runner = _watched_runner()
+        runner.batch_client.get_job.return_value = _batch_job_with_state(batch_v1.JobStatus.State.FAILED)
+        js = _job_state()
+        assert runner.check_watched_item(js) is None
+        assert js.running is False
+        js.job_wrapper.change_state.assert_called_once_with(model.Job.states.ERROR)
+        runner.mark_as_failed.assert_called_once_with(js)
+
+    def test_running_keeps_monitoring(self):
+        runner = _watched_runner()
+        runner.batch_client.get_job.return_value = _batch_job_with_state(batch_v1.JobStatus.State.RUNNING)
+        js = _job_state()
+        assert runner.check_watched_item(js) is js
+        assert js.running is True
+        js.job_wrapper.change_state.assert_called_once_with(model.Job.states.RUNNING)
+
+    @pytest.mark.parametrize("state", [batch_v1.JobStatus.State.QUEUED, batch_v1.JobStatus.State.SCHEDULED])
+    def test_queued_or_scheduled_sets_queued_state(self, state):
+        runner = _watched_runner()
+        runner.batch_client.get_job.return_value = _batch_job_with_state(state)
+        js = _job_state()
+        assert runner.check_watched_item(js) is js
+        assert js.running is True
+        js.job_wrapper.change_state.assert_called_once_with(model.Job.states.QUEUED)
+
+    def test_not_found_marks_failed_and_stops(self):
+        runner = _watched_runner()
+        runner.batch_client.get_job.side_effect = gcp_exceptions.NotFound("missing")
+        js = _job_state()
+        assert runner.check_watched_item(js) is None
+        assert js.running is False
+        js.job_wrapper.change_state.assert_called_once_with(model.Job.states.ERROR)
+        runner.mark_as_failed.assert_called_once_with(js)
+
+    def test_transient_error_keeps_monitoring(self):
+        runner = _watched_runner()
+        runner.batch_client.get_job.side_effect = RuntimeError("temporary")
+        js = _job_state()
+        assert runner.check_watched_item(js) is js
+        runner.mark_as_failed.assert_not_called()
