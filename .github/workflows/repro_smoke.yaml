@@ -1,0 +1,134 @@
+name: Repro smoke test
+
+# Standalone reproduction of the "Try installing the new image" smoke test from
+# build_container_image.yaml. It installs the public galaxy-deps and galaxy Helm
+# charts onto a single-node k3s cluster on the GitHub-hosted runner, so it sits
+# in the same ephemeral-storage envelope where the real job hits disk-pressure
+# eviction. No registry secrets are required: only the (public) image.tag is
+# overridden, so the chart pulls its default public image repository.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Galaxy image tag to deploy (e.g. dev, 26.1, a release tag)"
+        required: true
+        type: string
+        default: "26.1"
+      helm_timeout:
+        description: "Timeout for each helm install --wait"
+        required: false
+        type: string
+        default: "1200s"
+      allocate_ballast:
+        description: "Pre-allocate disk with fallocate to force disk-pressure eviction"
+        required: false
+        type: boolean
+        default: false
+      ballast_size:
+        description: "Amount of disk to pre-allocate when ballast is enabled (e.g. 9G)"
+        required: false
+        type: string
+        default: "9G"
+
+jobs:
+  smoke-test:
+    name: Try installing the image
+    runs-on: ubuntu-latest   # GitHub-hosted = same ~disk envelope that fails
+    steps:
+      - name: Start k8s locally
+        uses: jupyterhub/action-k3s-helm@v4
+        with:
+          k3s-version: v1.32.0+k3s1  # releases:  https://github.com/k3s-io/k3s/tags
+
+      - name: Verify function of k8s, kubectl, and helm
+        run: |
+          echo "kubeconfig: $KUBECONFIG"
+          kubectl version
+          kubectl get pods --all-namespaces
+          helm version
+          helm list
+
+      - name: Pre-allocate disk (ballast)
+        if: ${{ inputs.allocate_ballast }}
+        run: |
+          echo "Allocating ${{ inputs.ballast_size }} of ballast to reduce free disk..."
+          sudo fallocate -l ${{ inputs.ballast_size }} /ballast.img
+          ls -lh /ballast.img
+
+      - name: Disk usage before install
+        run: df -h
+
+      - name: Add the Galaxy Helm repository
+        run: helm repo add galaxy https://github.com/CloudVE/helm-charts/raw/master
+
+      - name: Install the Galaxy dependencies
+        run: |
+          helm install galaxy-deps galaxy/galaxy-deps \
+          --namespace galaxy-deps \
+          --create-namespace \
+          --set cvmfs.cvmfscsi.cache.alien.enabled=false \
+          --wait \
+          --timeout=${{ inputs.helm_timeout }}
+
+      - name: Install Galaxy using the requested image tag
+        run: |
+          helm install galaxy galaxy/galaxy \
+          --namespace galaxy \
+          --create-namespace \
+          --set persistence.accessMode="ReadWriteOnce" \
+          --set resources.requests.memory=0Mi,resources.requests.cpu=0m \
+          --set image.tag=${{ inputs.image_tag }} \
+          --wait \
+          --timeout=${{ inputs.helm_timeout }}
+
+      - name: Debug deployment on failure
+        if: failure()
+        run: |
+          echo "=== Deployment failed, gathering debug information ==="
+
+          echo "=== Node disk usage (runner) ==="
+          df -h
+
+          echo "=== Node status / conditions (watch for DiskPressure) ==="
+          kubectl get nodes -o wide
+          kubectl describe nodes | grep -A 15 -i "Conditions:" || true
+
+          echo "=== All pods in galaxy namespace ==="
+          kubectl get pods -n galaxy -o wide
+
+          echo "=== All pods in galaxy-deps namespace ==="
+          kubectl get pods -n galaxy-deps -o wide
+
+          echo "=== CSI Drivers ==="
+          kubectl get csidriver
+
+          echo "=== Storage Classes ==="
+          kubectl get sc
+
+          echo "=== PVCs in galaxy namespace ==="
+          kubectl get pvc -n galaxy
+
+          echo "=== PVCs in galaxy-deps namespace ==="
+          kubectl get pvc -n galaxy-deps
+
+          echo "=== Evicted pods (disk-pressure signature) ==="
+          kubectl get pods -A -o wide | grep -i evict || echo "No evicted pods found"
+
+          echo "=== Recent events in galaxy namespace ==="
+          kubectl get events -n galaxy --sort-by='.lastTimestamp' | tail -50
+
+          echo "=== Recent events in galaxy-deps namespace ==="
+          kubectl get events -n galaxy-deps --sort-by='.lastTimestamp' | tail -50
+
+          echo "=== Describe pending/failed pods in galaxy namespace ==="
+          for pod in $(kubectl get pods -n galaxy --field-selector=status.phase!=Running,status.phase!=Succeeded -o name 2>/dev/null); do
+            echo "--- Describing $pod ---"
+            kubectl describe -n galaxy $pod
+          done
+
+          echo "=== Describe pending/failed pods in galaxy-deps namespace ==="
+          for pod in $(kubectl get pods -n galaxy-deps --field-selector=status.phase!=Running,status.phase!=Succeeded -o name 2>/dev/null); do
+            echo "--- Describing $pod ---"
+            kubectl describe -n galaxy-deps $pod
+          done
