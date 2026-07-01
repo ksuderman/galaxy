@@ -47,7 +47,7 @@ jobs:
           remove_haskell: true
           remove_tool_cache: false   # kubectl/helm/k3s tooling lives here; keep it
           remove_swap: true
-          remove_packages: true
+          remove_packages: false   # NOTE: this input takes a space-separated package list, not a boolean; "false" = skip
 
       - name: Start k8s locally
         uses: jupyterhub/action-k3s-helm@v4
