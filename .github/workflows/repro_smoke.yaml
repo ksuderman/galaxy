@@ -36,6 +36,19 @@ jobs:
     name: Try installing the image
     runs-on: ubuntu-latest   # GitHub-hosted = same ~disk envelope that fails
     steps:
+      - name: Disk usage before cleanup
+        run: df -h
+
+      - name: Free up disk space
+        uses: endersonmenezes/free-disk-space@7901478139cff6e9d44df5972fd8ab8fcade4db1 # v3.2.2
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: false   # kubectl/helm/k3s tooling lives here; keep it
+          remove_swap: true
+          remove_packages: true
+
       - name: Start k8s locally
         uses: jupyterhub/action-k3s-helm@v4
         with:
@@ -81,6 +94,9 @@ jobs:
           --set image.tag=${{ inputs.image_tag }} \
           --wait \
           --timeout=${{ inputs.helm_timeout }}
+
+      - name: Disk usage after Galaxy install
+        run: df -h
 
       - name: Debug deployment on failure
         if: failure()
