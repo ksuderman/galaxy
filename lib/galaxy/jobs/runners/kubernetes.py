@@ -466,7 +466,7 @@ class KubernetesJobRunner(AsynchronousJobRunner[AsynchronousJobState]):
             configured_eps = [ep for ep in ajs.job_wrapper.get_job().interactivetool_entry_points if ep.configured]
             for entry_point in configured_eps:
                 # sending in self.app as `trans` since it's only used for `.security` so seems to work
-                entry_point_path = self.app.interactivetool_manager.get_entry_point_path(self.app, entry_point)
+                entry_point_path = self.app.interactivetool_manager.get_entry_point_path(entry_point)
                 if "?" in entry_point_path:
                     # Removing all the parameters from the ingress path, but they will still be in the database
                     # so the link that the user clicks on will still have them
@@ -476,9 +476,7 @@ class KubernetesJobRunner(AsynchronousJobRunner[AsynchronousJobState]):
                     entry_point_path = entry_point_path.split("?")[0]
                 entry_point_domain = f"{self.app.config.interactivetools_proxy_host}"
                 if entry_point.requires_domain:
-                    entry_point_subdomain = self.app.interactivetool_manager.get_entry_point_subdomain(
-                        self.app, entry_point
-                    )
+                    entry_point_subdomain = self.app.interactivetool_manager.get_entry_point_subdomain(entry_point)
                     entry_point_domain = f"{entry_point_subdomain}.{entry_point_domain}"
                     entry_point_path = "/"
                 entry_points.append(
@@ -596,7 +594,7 @@ class KubernetesJobRunner(AsynchronousJobRunner[AsynchronousJobState]):
                 configured_eps = [ep for ep in ajs.job_wrapper.get_job().interactivetool_entry_points if ep.configured]
                 for entry_point in configured_eps:
                     # sending in self.app as `trans` since it's only used for `.security` so seems to work
-                    entry_point_path = self.app.interactivetool_manager.get_entry_point_path(self.app, entry_point)
+                    entry_point_path = self.app.interactivetool_manager.get_entry_point_path(entry_point)
                     if "?" in entry_point_path:
                         # Removing all the parameters from the ingress path, but they will still be in the database
                         # so the link that the user clicks on will still have them
@@ -606,9 +604,7 @@ class KubernetesJobRunner(AsynchronousJobRunner[AsynchronousJobState]):
                         entry_point_path = entry_point_path.split("?")[0]
                     entry_point_domain = f"{self.app.config.interactivetools_proxy_host}"
                     if entry_point.requires_domain:
-                        entry_point_subdomain = self.app.interactivetool_manager.get_entry_point_subdomain(
-                            self.app, entry_point
-                        )
+                        entry_point_subdomain = self.app.interactivetool_manager.get_entry_point_subdomain(entry_point)
                         entry_point_domain = f"{entry_point_subdomain}.{entry_point_domain}"
                     envs.append({"name": "INTERACTIVETOOL_PORT", "value": str(entry_point.tool_port)})
                     envs.append({"name": "INTERACTIVETOOL_DOMAIN", "value": str(entry_point_domain)})
