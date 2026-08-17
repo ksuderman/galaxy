@@ -64,8 +64,8 @@ RUN ansible-playbook -i localhost, playbook.yml -v -e galaxy_virtualenv_command=
 
 # Remove build artifacts + files not needed in container
 WORKDIR $SERVER_DIR
-# Save commit hash of HEAD before zapping git folder
-RUN git rev-parse HEAD > GITREVISION
+# The commit hash comes from the GIT_COMMIT build arg (see version.json below), not from
+# `git rev-parse` here: the build context does not always carry a usable .git directory.
 RUN rm -rf \
         .ci \
         .git \
@@ -152,7 +152,7 @@ COPY --chown=$GALAXY_USER:$GALAXY_USER --from=stage1 $ROOT_DIR .
 WORKDIR $SERVER_DIR
 
 # The data in version.json will be displayed in Galaxy's /api/version endpoint
-RUN printf "{\n  \"git_commit\": \"$(cat GITREVISION)\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
+RUN printf "{\n  \"git_commit\": \"$GIT_COMMIT\",\n  \"build_date\": \"$BUILD_DATE\",\n  \"image_tag\": \"$IMAGE_TAG\"\n}\n" > version.json \
     && chown $GALAXY_USER:$GALAXY_USER version.json
 
 EXPOSE 8080
