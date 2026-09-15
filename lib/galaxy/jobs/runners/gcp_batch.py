@@ -7,6 +7,7 @@ This runner submits Galaxy jobs to Google Cloud Batch for execution.
 import json
 import logging
 import os
+import shutil
 import time
 from typing import (
     Any,
@@ -25,6 +26,7 @@ from galaxy.jobs.runners.util.gcp_batch import (
     compute_machine_type,
     CONTAINER_SCRIPT_TEMPLATE,
     convert_cpu_to_milli,
+    convert_duration_to_seconds,
     convert_memory_to_mib,
     DEFAULT_CVMFS_DOCKER_VOLUME,
     DEFAULT_MAX_RUN_DURATION,
@@ -34,9 +36,27 @@ from galaxy.jobs.runners.util.gcp_batch import (
     DIRECT_SCRIPT_TEMPLATE,
     parse_docker_volumes_param,
     parse_volumes_param,
+    POOLED_TASK_CONTAINER_TEMPLATE,
+    render_pooled_wrapper_script,
     resolve_max_run_duration,
     sanitize_label_value,
 )
+from galaxy.jobs.runners.util.gcp_batch.pool import (
+    atomic_write,
+    CANCEL_FILENAME,
+    compute_pool_key,
+    DONE_PREFIX,
+    EXITING_FILENAME,
+    HEARTBEAT_FILENAME,
+    HEARTBEAT_STALE_AFTER,
+    POOL_SAFETY_MARGIN,
+    PooledVM,
+    SHUTDOWN_FILENAME,
+    TASK_FILENAME,
+    VMPool,
+    VMState,
+)
+from galaxy.util import string_as_bool
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +110,21 @@ RUNNER_PARAM_SPECS: dict[str, dict[str, Any]] = {
     # Object store fallback (for future use)
     "use_object_store": dict(map=bool, default=False),
     "object_store_path": dict(map=str, default=None),
+    # Warm VM pool (see util/gcp_batch/pool.py). Disabled by default; with
+    # pool_enabled false the runner behaves exactly as before. Pooling only
+    # applies to containerized jobs (use_container=true).
+    "pool_enabled": dict(map=bool, default=False),
+    # Idle seconds before a pooled VM's wrapper exits and the VM is torn down
+    "pool_ttl_seconds": dict(map=int, default=300),
+    # Max idle VMs retained per handler (running jobs are uncapped, as today)
+    "pool_max_size": dict(map=int, default=5),
+    # Batch max_run_duration for pooled VMs (spans all jobs on the VM plus idle time)
+    "pool_max_vm_lifetime": dict(map=str, default="24h"),
+    # How long to wait for a VM to claim a handed-off task before resubmitting fresh
+    "pool_claim_timeout_seconds": dict(map=int, default=60),
+    # Handoff root on the shared NFS mount; default derives
+    # <first gcp_batch_volume mount_path>/.galaxy-vm-pool
+    "pool_dir": dict(map=str, default=None),
 }
 
 
@@ -109,6 +144,10 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
         # Initialize Google Cloud Batch client
         self._init_batch_client()
+
+        # In-memory registry of warm pooled VMs (empty and inert unless a
+        # destination enables pool_enabled).
+        self._vm_pool = VMPool()
 
         log.info(
             "GoogleCloudBatchJobRunner initialized for project: %s",
@@ -190,8 +229,8 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             return
 
         try:
-            # Submit job to Google Cloud Batch
-            batch_job_name = self._submit_batch_job(job_wrapper, ajs)
+            # Submit job to Google Cloud Batch (via the warm VM pool if enabled)
+            batch_job_name = self._dispatch_job(job_wrapper, ajs)
 
             # Store runner information for tracking if Galaxy restarts
             ajs.job_id = batch_job_name
@@ -241,6 +280,193 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             log.error("Failed to create Batch job: %s", e)
             raise
 
+    def _dispatch_job(self, job_wrapper, ajs) -> str:
+        """Route a job to a warm pooled VM or to a fresh Batch job.
+
+        With pooling disabled (the default) this is exactly the pre-pool
+        submission path. Pooling only supports containerized jobs; direct-mode
+        destinations log a note and run non-pooled.
+        """
+        params = self._get_job_params(job_wrapper.job_destination)
+        # Destination values arrive as strings, so bool("false") would be True;
+        # string_as_bool handles both real bools and strings.
+        if not string_as_bool(params.get("pool_enabled") or False):
+            return self._submit_batch_job(job_wrapper, ajs)
+        if not string_as_bool(params.get("use_container", True)):
+            log.info(
+                "VM pooling only supports containerized jobs; job %s runs non-pooled (use_container=false)",
+                job_wrapper.get_id_tag(),
+            )
+            return self._submit_batch_job(job_wrapper, ajs)
+        return self._dispatch_pooled_job(job_wrapper, ajs, params)
+
+    def _dispatch_pooled_job(self, job_wrapper, ajs, params) -> str:
+        """Hand the job to an idle pooled VM, or provision a fresh pooled VM."""
+        cpu_milli, memory_mib = self._get_job_resources(job_wrapper, params)
+        machine_type = compute_machine_type(cpu_milli, memory_mib)
+        walltime = resolve_max_run_duration(
+            job_wrapper.job_destination.params, params, job_wrapper.get_resource_parameters()
+        )
+        walltime_seconds = int(walltime.rstrip("s"))
+        lifetime_seconds = int(convert_duration_to_seconds(params["pool_max_vm_lifetime"]).rstrip("s"))
+        if walltime_seconds + POOL_SAFETY_MARGIN >= lifetime_seconds:
+            # Checkout requires remaining VM lifetime >= walltime + margin, so a
+            # walltime this close to the VM lifetime means no VM can ever be
+            # reused: every job will provision (and pay for) a fresh pooled VM.
+            log.warning(
+                "Job %s walltime (%ss) is not safely below pool_max_vm_lifetime (%ss); "
+                "pooled VM reuse is impossible with these settings - set max_run_duration/walltime "
+                "well below pool_max_vm_lifetime",
+                job_wrapper.get_id_tag(),
+                walltime_seconds,
+                lifetime_seconds,
+            )
+        pool_key = compute_pool_key(self._pool_key_params(params, machine_type))
+        payload = self._render_task_payload(job_wrapper, ajs, params, cpu_milli, memory_mib, walltime_seconds)
+        claim_timeout = int(params["pool_claim_timeout_seconds"])
+
+        now = time.time()
+        vm = self._vm_pool.checkout(pool_key, now=now, min_remaining_lifetime=walltime_seconds)
+        if vm is not None:
+            vm.current_galaxy_job_id = str(job_wrapper.job_id)
+            atomic_write(os.path.join(vm.vm_dir, TASK_FILENAME), payload)
+            self._set_pooled_state(ajs, params, vm.batch_job_name, vm.vm_dir, claim_deadline=now + claim_timeout)
+            log.info("Reusing pooled VM %s for job %s", vm.batch_job_name, job_wrapper.get_id_tag())
+            return vm.batch_job_name
+
+        # Miss: provision a fresh pooled VM with the payload already staged in
+        # its handoff directory; the wrapper claims it on boot.
+        prefix = params.get("job_id_prefix") or "galaxy-job"
+        job_name = f"{prefix}-{int(now)}-{os.urandom(4).hex()}-{job_wrapper.get_id_tag()}"
+        vm_dir = os.path.join(self._resolve_pool_dir(params), job_name)
+        os.makedirs(vm_dir, exist_ok=True)
+        atomic_write(os.path.join(vm_dir, TASK_FILENAME), payload)
+
+        try:
+            self._submit_pooled_batch_job(job_wrapper, ajs, params, job_name, vm_dir, lifetime_seconds)
+        except Exception:
+            shutil.rmtree(vm_dir, ignore_errors=True)
+            raise
+
+        self._vm_pool.register(
+            PooledVM(
+                batch_job_name=job_name,
+                pool_key=pool_key,
+                vm_dir=vm_dir,
+                batch_job_path=f"projects/{params['project_id']}/locations/{params['region']}/jobs/{job_name}",
+                created_at=now,
+                lifetime_seconds=lifetime_seconds,
+                idle_ttl_seconds=int(params["pool_ttl_seconds"]),
+                state=VMState.BUSY,
+                current_galaxy_job_id=str(job_wrapper.job_id),
+            )
+        )
+        # No claim deadline yet: VM boot takes minutes, so the claim clock only
+        # starts once the Batch job reports RUNNING (see _check_pooled_item).
+        self._set_pooled_state(ajs, params, job_name, vm_dir, claim_deadline=None)
+        log.info("Provisioned fresh pooled VM %s for job %s", job_name, job_wrapper.get_id_tag())
+        return job_name
+
+    def _set_pooled_state(self, ajs, params, vm_id, vm_dir, claim_deadline):
+        """Stash the pooled-handoff tracking state on the job's AsynchronousJobState."""
+        ajs.pooled_vm_id = vm_id
+        ajs.pooled_vm_dir = vm_dir
+        ajs.pool_claim_deadline = claim_deadline
+        ajs.pool_claim_timeout = int(params["pool_claim_timeout_seconds"])
+        ajs.pool_max_size = int(params["pool_max_size"])
+
+    def _pool_key_params(self, params, machine_type) -> dict[str, Any]:
+        """The instance parameters that define whether two jobs may share a VM.
+
+        The resolved machine type is used (not raw cpu/mem requests) so that
+        different requests mapping to the same machine type share VMs. The
+        container image is deliberately excluded: docker pull is per-job, so
+        same-image reuse is a cache win, not a correctness requirement.
+        """
+        return {
+            "project_id": params.get("project_id"),
+            "region": params.get("region"),
+            "zone": params.get("zone"),
+            "machine_type": machine_type,
+            "custom_vm_image": params.get("custom_vm_image"),
+            "boot_disk_size_gb": params.get("boot_disk_size_gb"),
+            "boot_disk_type": params.get("boot_disk_type"),
+            "network": params.get("network"),
+            "subnet": params.get("subnet"),
+            "service_account_email": params.get("service_account_email"),
+            "gcp_batch_volumes": params.get("gcp_batch_volumes"),
+            "docker_extra_volumes": params.get("docker_extra_volumes"),
+            "galaxy_user_id": params.get("galaxy_user_id"),
+            "galaxy_group_id": params.get("galaxy_group_id"),
+            "use_container": True,
+        }
+
+    def _resolve_pool_dir(self, params) -> str:
+        """Resolve the handoff root directory (must be on the shared NFS mount)."""
+        if pool_dir := params.get("pool_dir"):
+            return pool_dir
+        volumes_param = params.get("gcp_batch_volumes")
+        parsed_volumes = parse_volumes_param(volumes_param) if volumes_param else []
+        mount_path = parsed_volumes[0]["mount_path"] if parsed_volumes else DEFAULT_NFS_MOUNT_PATH
+        return os.path.join(mount_path, ".galaxy-vm-pool")
+
+    def _render_task_payload(self, job_wrapper, ajs, params, cpu_milli, memory_mib, walltime_seconds) -> str:
+        """Render the per-job payload dropped into a pooled VM's handoff dir."""
+        container_image = self._get_container_image(job_wrapper)
+        settings = self._container_script_settings(params, cpu_milli)
+        return POOLED_TASK_CONTAINER_TEMPLATE.substitute(
+            galaxy_job_id=job_wrapper.job_id,
+            job_id_tag=job_wrapper.get_id_tag(),
+            tool_id=job_wrapper.tool.id if job_wrapper.tool else "unknown",
+            container_image=container_image,
+            nfs_mount_path=settings["nfs_mount_path"],
+            docker_volume_args=settings["docker_volume_args"],
+            docker_user_flag=settings["docker_user_flag"],
+            galaxy_slots=settings["galaxy_slots"],
+            galaxy_memory_mb=memory_mib,
+            job_file=ajs.job_file,
+            job_walltime_seconds=walltime_seconds,
+        )
+
+    def _submit_pooled_batch_job(self, job_wrapper, ajs, params, job_name, vm_dir, lifetime_seconds) -> None:
+        """Submit the Batch job that boots a pooled VM running the idle wrapper.
+
+        Reuses the standard job spec (volumes, network, machine type, disks,
+        service account) and overrides only what pooling changes: the runnable
+        script, no retries, the VM-lifetime run duration, and a pool label.
+        """
+        batch_job = self._create_batch_job_spec(job_wrapper, ajs, params)
+        cpu_milli, _ = self._get_job_resources(job_wrapper, params)
+        settings = self._container_script_settings(params, cpu_milli)
+        wrapper_script = render_pooled_wrapper_script(
+            nfs_server=settings["nfs_server"],
+            nfs_path=settings["nfs_path"],
+            nfs_mount_path=settings["nfs_mount_path"],
+            vm_dir=vm_dir,
+            pool_ttl_seconds=int(params["pool_ttl_seconds"]),
+            vm_lifetime_seconds=lifetime_seconds,
+        )
+        task_spec = batch_job.task_groups[0].task_spec
+        task_spec.runnables[0].script.text = wrapper_script
+        # A Batch retry would boot a duplicate wrapper watching the same
+        # handoff directory; never retry pooled VMs.
+        task_spec.max_retry_count = 0
+        task_spec.max_run_duration = f"{lifetime_seconds}s"
+        batch_job.labels["galaxy-pooled"] = "true"
+
+        request = batch_v1.CreateJobRequest()
+        request.parent = f"projects/{params['project_id']}/locations/{params['region']}"
+        request.job_id = job_name
+        request.job = batch_job
+
+        try:
+            self._write_debug_files(job_wrapper, ajs, params, request, job_name)
+        except Exception as e:
+            log.warning("Failed to write debug files for job %s: %s", job_wrapper.get_id_tag(), e)
+
+        operation = self.batch_client.create_job(request=request)
+        log.info("Submitted pooled Batch job %s, operation: %s", job_name, operation.name)
+
     def _get_job_params(self, job_destination) -> dict[str, Any]:
         """Extract job parameters from destination and runner configuration."""
         log.debug("Starting _get_job_params")
@@ -270,6 +496,12 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "object_store_path",
             "service_account_email",
             "job_id_prefix",
+            "pool_enabled",
+            "pool_ttl_seconds",
+            "pool_max_size",
+            "pool_max_vm_lifetime",
+            "pool_claim_timeout_seconds",
+            "pool_dir",
         ]:
             # Subscript access on runner_params (a defaultdict) so unset keys fall
             # back to the spec defaults defined in runner_param_specs; .get() would
@@ -537,8 +769,12 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         # Fall back to configured default
         return int(params.get("memory_mib", DEFAULT_MEMORY_MIB))
 
-    def _create_container_execution_script(self, job_wrapper, ajs, params, container_image, cpu_milli, memory_mib):
-        """Create a script that runs the Galaxy job inside a container with volume mounts."""
+    def _container_script_settings(self, params, cpu_milli):
+        """Resolve the settings shared by the container execution scripts.
+
+        Used by both the non-pooled container script and the pooled task
+        payload so the two render from identical NFS/docker settings.
+        """
         # Parse volumes from gcp_batch_volumes parameter
         volumes_param = params.get("gcp_batch_volumes")
         parsed_volumes = parse_volumes_param(volumes_param) if volumes_param else []
@@ -572,21 +808,32 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         else:
             docker_user_flag = ""
 
-        # Compute galaxy_slots from allocated CPU (at least 1 slot)
-        galaxy_slots = max(1, int(cpu_milli / 1000))
+        return {
+            "nfs_server": nfs_server,
+            "nfs_path": nfs_path,
+            "nfs_mount_path": nfs_mount_path,
+            "docker_volume_args": docker_volume_args,
+            "docker_user_flag": docker_user_flag,
+            # Compute galaxy_slots from allocated CPU (at least 1 slot)
+            "galaxy_slots": max(1, int(cpu_milli / 1000)),
+        }
+
+    def _create_container_execution_script(self, job_wrapper, ajs, params, container_image, cpu_milli, memory_mib):
+        """Create a script that runs the Galaxy job inside a container with volume mounts."""
+        settings = self._container_script_settings(params, cpu_milli)
 
         template_params = {
             "job_id_tag": job_wrapper.get_id_tag(),
             "tool_id": job_wrapper.tool.id if job_wrapper.tool else "unknown",
             "container_image": container_image,
-            "nfs_server": nfs_server,
-            "nfs_path": nfs_path,
-            "nfs_mount_path": nfs_mount_path,
+            "nfs_server": settings["nfs_server"],
+            "nfs_path": settings["nfs_path"],
+            "nfs_mount_path": settings["nfs_mount_path"],
             "job_file": ajs.job_file,
-            "galaxy_slots": galaxy_slots,
+            "galaxy_slots": settings["galaxy_slots"],
             "galaxy_memory_mb": memory_mib,
-            "docker_user_flag": docker_user_flag,
-            "docker_volume_args": docker_volume_args,
+            "docker_user_flag": settings["docker_user_flag"],
+            "docker_volume_args": settings["docker_volume_args"],
         }
 
         return CONTAINER_SCRIPT_TEMPLATE.substitute(template_params)
@@ -721,8 +968,22 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
         log.debug("Finished _write_debug_files for job %s", job_wrapper.get_id_tag())
 
+    def check_watched_items(self) -> None:
+        """Run the standard per-job checks, then reap the warm VM pool.
+
+        Runs every monitor_sleep_time seconds on the runner's monitor thread;
+        no extra thread is needed for pool bookkeeping.
+        """
+        super().check_watched_items()
+        try:
+            self._reap_pool()
+        except Exception:
+            log.exception("Unhandled exception reaping the GCP Batch VM pool")
+
     def check_watched_item(self, job_state):
         """Check the status of a job running on Google Cloud Batch."""
+        if getattr(job_state, "pooled_vm_id", None):
+            return self._check_pooled_item(job_state)
         log.debug("Starting check_watched_item for job %s", job_state.job_id)
 
         batch_job_name = job_state.job_id
@@ -781,12 +1042,233 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             # Return job_state to continue monitoring - might be temporary error
             return job_state
 
+    def _vm_batch_job_path(self, vm_id: str) -> str:
+        """Fully qualified Batch job path for a pooled VM.
+
+        Prefers the path stored at submit time (which used destination-merged
+        params); falls back to runner-level project/region only if the VM is
+        somehow not registered.
+        """
+        if vm := self._vm_pool.get(vm_id):
+            return vm.batch_job_path
+        return f"projects/{self.runner_params['project_id']}/locations/{self.runner_params['region']}/jobs/{vm_id}"
+
+    def _check_pooled_item(self, job_state):
+        """Monitor a job handed to a pooled VM via the NFS handoff protocol.
+
+        State machine (see util/gcp_batch/pool.py for the protocol):
+          - done marker present        -> finished; VM back to the pool
+          - task.sh still unclaimed    -> waiting; after the claim deadline the
+                                          payload is reclaimed (atomic rename)
+                                          and the job resubmitted fresh
+          - claimed, no done marker    -> running; Batch job death or a stale
+                                          heartbeat fails the Galaxy job
+        """
+        vm_id = job_state.pooled_vm_id
+        vm_dir = job_state.pooled_vm_dir
+        galaxy_job_id = str(job_state.job_wrapper.job_id)
+        done_path = os.path.join(vm_dir, f"{DONE_PREFIX}{galaxy_job_id}")
+        task_path = os.path.join(vm_dir, TASK_FILENAME)
+
+        if os.path.exists(done_path):
+            log.info("Pooled job %s finished on VM %s", job_state.job_wrapper.get_id_tag(), vm_id)
+            job_state.running = False
+            job_state.job_wrapper.change_state(model.Job.states.OK)
+            self.mark_as_finished(job_state)
+            try:
+                os.remove(done_path)
+            except OSError:
+                pass
+            self._return_vm_to_pool(job_state, vm_id)
+            return None
+
+        # Batch state doubles as the VM death detector on every branch below.
+        try:
+            batch_job = self.batch_client.get_job(name=self._vm_batch_job_path(vm_id))
+            batch_state = batch_job.status.state
+        except gcp_exceptions.NotFound:
+            batch_state = None
+        except Exception as e:
+            log.error("Error checking status of pooled Batch job %s: %s", vm_id, e)
+            return job_state  # might be a temporary error; keep watching
+
+        vm_dead = batch_state in (None, batch_v1.JobStatus.State.FAILED, batch_v1.JobStatus.State.SUCCEEDED)
+
+        if os.path.exists(task_path):
+            # ASSIGNED: the payload has not been claimed yet.
+            if vm_dead:
+                # The VM died (or exited) before claiming; the job never
+                # started, so resubmitting fresh is safe.
+                log.warning("Pooled VM %s gone before claiming job %s; resubmitting fresh", vm_id, galaxy_job_id)
+                return self._reclaim_and_resubmit(job_state, vm_id, task_path)
+            deadline = getattr(job_state, "pool_claim_deadline", None)
+            if deadline is None:
+                # Fresh VM still provisioning; start the claim clock once the
+                # Batch job reports RUNNING (the wrapper is then booting).
+                if batch_state == batch_v1.JobStatus.State.RUNNING:
+                    job_state.pool_claim_deadline = time.time() + job_state.pool_claim_timeout
+                else:
+                    job_state.job_wrapper.change_state(model.Job.states.QUEUED)
+                return job_state
+            if time.time() > deadline:
+                log.warning("Pooled VM %s did not claim job %s in time; reclaiming", vm_id, galaxy_job_id)
+                return self._reclaim_and_resubmit(job_state, vm_id, task_path)
+            return job_state
+
+        # CLAIMED: the job is (or was) running on the VM.
+        if not vm_dead:
+            heartbeat_path = os.path.join(vm_dir, HEARTBEAT_FILENAME)
+            try:
+                vm_dead = (time.time() - os.path.getmtime(heartbeat_path)) > HEARTBEAT_STALE_AFTER
+            except OSError:
+                pass  # heartbeat not written yet; Batch state governs
+        if vm_dead:
+            log.warning("Pooled VM %s died while running job %s", vm_id, galaxy_job_id)
+            self._deregister_vm_by_id(vm_id)
+            job_state.running = False
+            job_state.fail_message = "The pooled VM running this job terminated unexpectedly"
+            job_state.job_wrapper.change_state(model.Job.states.ERROR)
+            self.mark_as_failed(job_state)
+            return None
+        job_state.running = True
+        job_state.job_wrapper.change_state(model.Job.states.RUNNING)
+        return job_state
+
+    def _reclaim_and_resubmit(self, job_state, vm_id, task_path):
+        """Reclaim an unclaimed payload and resubmit the job as a fresh Batch job.
+
+        The reclaim is the runner's side of the rename race: if the mv fails
+        because the wrapper claimed the file first, the job proceeds normally.
+        """
+        try:
+            os.rename(task_path, f"{task_path}.reclaimed.{os.urandom(4).hex()}")
+        except FileNotFoundError:
+            # The VM won the race and claimed the payload just now.
+            return job_state
+        except OSError as e:
+            log.error("Failed to reclaim payload for job %s from VM %s: %s", job_state.job_id, vm_id, e)
+            return job_state
+        self._deregister_vm_by_id(vm_id)
+        job_state.pooled_vm_id = None
+        job_state.pooled_vm_dir = None
+        job_state.pool_claim_deadline = None
+        # Resubmission happens on a worker thread, not the monitor thread.
+        self.work_queue.put((self._fallback_submit_fresh, job_state))
+        return None
+
+    def _fallback_submit_fresh(self, ajs):
+        """Resubmit a job whose pooled handoff was reclaimed as a fresh Batch job."""
+        job_wrapper = ajs.job_wrapper
+        job = job_wrapper.get_job()
+        if job.state in (
+            model.Job.states.DELETING,
+            model.Job.states.DELETED,
+            model.Job.states.STOPPING,
+            model.Job.states.STOPPED,
+        ):
+            # The user cancelled the job while its handoff was pending; do not
+            # spend money running it fresh.
+            log.info("Not resubmitting job %s after reclaim; job state is %s", job_wrapper.get_id_tag(), job.state)
+            return
+        try:
+            batch_job_name = self._submit_batch_job(job_wrapper, ajs)
+            ajs.job_id = batch_job_name
+            job_wrapper.set_external_id(batch_job_name)
+            self.monitor_queue.put(ajs)
+            log.info(
+                "Resubmitted job %s as fresh Batch job %s after unclaimed pooled handoff",
+                job_wrapper.get_id_tag(),
+                batch_job_name,
+            )
+        except Exception as e:
+            log.error("Failed to resubmit job %s to Google Cloud Batch: %s", job_wrapper.get_id_tag(), e)
+            job_wrapper.fail(f"Failed to submit job to Google Cloud Batch: {e}")
+
+    def _return_vm_to_pool(self, job_state, vm_id):
+        """Return a VM whose job completed to the idle pool, or drain it."""
+        vm = self._vm_pool.get(vm_id)
+        if vm is None:
+            return
+        now = time.time()
+        max_size = getattr(job_state, "pool_max_size", 0)
+        if self._vm_pool.idle_count(vm.pool_key) >= max_size:
+            log.debug("Idle pool at capacity (%d); draining VM %s", max_size, vm_id)
+            self._drain_vm(vm)
+        elif vm.remaining_lifetime(now) < vm.idle_ttl_seconds + POOL_SAFETY_MARGIN:
+            log.debug("VM %s near its lifetime deadline; draining", vm_id)
+            self._drain_vm(vm)
+        else:
+            self._vm_pool.checkin(vm_id, now)
+            log.debug("Returned VM %s to the warm pool", vm_id)
+
+    def _drain_vm(self, vm):
+        """Ask a pooled VM to exit (shutdown marker) and mark it draining."""
+        try:
+            atomic_write(os.path.join(vm.vm_dir, SHUTDOWN_FILENAME), "")
+        except OSError as e:
+            log.warning("Failed to write shutdown marker for pooled VM %s: %s", vm.batch_job_name, e)
+        self._vm_pool.mark_draining(vm.batch_job_name, time.time())
+
+    def _deregister_vm_by_id(self, vm_id, delete_batch_job=True):
+        vm = self._vm_pool.remove(vm_id)
+        if vm is None:
+            return
+        if delete_batch_job and self.runner_params.get("delete_completed_jobs", True):
+            try:
+                self.batch_client.delete_job(name=vm.batch_job_path)
+                log.debug("Deleted pooled Batch job %s", vm.batch_job_name)
+            except gcp_exceptions.NotFound:
+                pass
+            except Exception as e:
+                log.warning("Failed to delete pooled Batch job %s: %s", vm.batch_job_name, e)
+        shutil.rmtree(vm.vm_dir, ignore_errors=True)
+
+    def _reap_pool(self):
+        """Pool housekeeping, run once per monitor sweep.
+
+        Idle VMs past their TTL get a shutdown marker; draining VMs that
+        ignored it get their Batch job deleted; VMs whose Batch job is terminal
+        (or that announced they are exiting) are deregistered and cleaned up.
+        BUSY/PROVISIONING VMs are owned by their job's monitor entry.
+        """
+        now = time.time()
+        for vm in self._vm_pool.expired_idle(now):
+            log.debug("Pooled VM %s idle past its TTL; sending shutdown", vm.batch_job_name)
+            self._drain_vm(vm)
+        for vm in self._vm_pool.all_vms():
+            if vm.state not in (VMState.IDLE, VMState.DRAINING):
+                continue
+            try:
+                batch_job = self.batch_client.get_job(name=vm.batch_job_path)
+                terminal = batch_job.status.state in (
+                    batch_v1.JobStatus.State.SUCCEEDED,
+                    batch_v1.JobStatus.State.FAILED,
+                )
+            except gcp_exceptions.NotFound:
+                terminal = True
+            except Exception as e:
+                log.warning("Error checking pooled Batch job %s: %s", vm.batch_job_name, e)
+                continue
+            if terminal or os.path.exists(os.path.join(vm.vm_dir, EXITING_FILENAME)):
+                self._deregister_vm_by_id(vm.batch_job_name)
+            elif (
+                vm.state is VMState.DRAINING
+                and vm.idle_since is not None
+                and (now - vm.idle_since) > POOL_SAFETY_MARGIN
+            ):
+                # The VM ignored the shutdown marker (e.g. NFS trouble); force it.
+                log.warning("Pooled VM %s ignored shutdown; deleting its Batch job", vm.batch_job_name)
+                self._deregister_vm_by_id(vm.batch_job_name)
+
     def stop_job(self, job_wrapper):
         """Stop a job running on Google Cloud Batch."""
         job = job_wrapper.get_job()
         log.debug("Starting stop_job for job %s", job.id)
 
         if batch_job_name := job.get_job_runner_external_id():
+            if self._stop_pooled_job(job, batch_job_name):
+                log.debug("Finished stop_job for pooled job %s", job.id)
+                return
             if not self.runner_params.get("delete_completed_jobs", True):
                 try:
                     job_path = f"projects/{self.runner_params['project_id']}/locations/{self.runner_params['region']}/jobs/{batch_job_name}"
@@ -816,6 +1298,62 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
         log.debug("Finished stop_job for job %s", job.id)
 
+    def _stop_pooled_job(self, job, batch_job_name) -> bool:
+        """Pooled-job branch of stop_job. Returns True if the stop was handled.
+
+        The cancel marker makes the wrapper kill the named container; the
+        shutdown marker makes the VM exit (it is not returned to the pool).
+        The Batch job delete is the backstop in case the NFS markers never
+        reach the VM.
+        """
+        vm = self._vm_pool.get(batch_job_name)
+        if vm is None:
+            return False
+        if vm.current_galaxy_job_id != str(job.id):
+            # The VM has already moved on (idle or running another job); the
+            # Batch job must NOT be deleted out from under it.
+            log.debug("Pooled VM %s no longer running job %s; nothing to stop", batch_job_name, job.id)
+            return True
+        try:
+            atomic_write(os.path.join(vm.vm_dir, CANCEL_FILENAME), "")
+            atomic_write(os.path.join(vm.vm_dir, SHUTDOWN_FILENAME), "")
+        except OSError as e:
+            log.warning("Failed to write cancel markers for pooled VM %s: %s", batch_job_name, e)
+        self._vm_pool.mark_draining(batch_job_name, time.time())
+        try:
+            self.batch_client.delete_job(name=vm.batch_job_path)
+            log.info("Deleted pooled Batch job %s to stop job %s", batch_job_name, job.id)
+        except gcp_exceptions.NotFound:
+            log.debug("Pooled Batch job %s already deleted", batch_job_name)
+        except Exception as e:
+            log.error("Failed to delete pooled Batch job %s: %s", batch_job_name, e)
+        return True
+
+    def shutdown(self):
+        """Shut down the runner, tearing down idle pooled VMs.
+
+        BUSY VMs are left running: their jobs are recovered on restart and the
+        wrapper's own TTL/lifetime deadlines guarantee eventual teardown even
+        if Galaxy never comes back.
+        """
+        super().shutdown()
+        pool = getattr(self, "_vm_pool", None)
+        if pool is None:
+            return
+        for vm in pool.all_vms():
+            if vm.state not in (VMState.IDLE, VMState.DRAINING):
+                continue
+            try:
+                atomic_write(os.path.join(vm.vm_dir, SHUTDOWN_FILENAME), "")
+            except OSError:
+                pass
+            try:
+                self.batch_client.delete_job(name=vm.batch_job_path)
+                log.info("Deleted idle pooled Batch job %s on shutdown", vm.batch_job_name)
+            except Exception as e:
+                log.debug("Failed to delete idle pooled Batch job %s on shutdown: %s", vm.batch_job_name, e)
+            pool.remove(vm.batch_job_name)
+
     def recover(self, job, job_wrapper):
         """Recover jobs that were running when Galaxy restarted."""
         log.debug("Starting recover for job %s", job.id)
@@ -832,6 +1370,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         ajs.job_id = job.get_job_runner_external_id()
 
         if ajs.job_id:
+            self._maybe_reattach_pooled(job, job_wrapper, ajs)
             # Add to monitoring if job was running
             if job.state in [model.Job.states.RUNNING, model.Job.states.QUEUED]:
                 ajs.running = job.state == model.Job.states.RUNNING
@@ -841,3 +1380,42 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             log.warning("Could not recover job %s - no external job ID", job.id)
 
         log.debug("Finished recover for job %s", job.id)
+
+    def _maybe_reattach_pooled(self, job, job_wrapper, ajs) -> None:
+        """Reattach a recovered job to its pooled VM if its handoff dir exists.
+
+        _check_pooled_item then handles every case: the done marker is already
+        there, the job is still running, or the VM died meanwhile. Idle VMs
+        lost from memory on restart self-expire via the wrapper's TTL, so they
+        need no rediscovery.
+        """
+        params = self._get_job_params(job_wrapper.job_destination)
+        if not string_as_bool(params.get("pool_enabled") or False):
+            return
+        vm_dir = os.path.join(self._resolve_pool_dir(params), ajs.job_id)
+        if not os.path.isdir(vm_dir):
+            return
+        now = time.time()
+        if self._vm_pool.get(ajs.job_id) is None:
+            cpu_milli, memory_mib = self._get_job_resources(job_wrapper, params)
+            machine_type = compute_machine_type(cpu_milli, memory_mib)
+            self._vm_pool.register(
+                PooledVM(
+                    batch_job_name=ajs.job_id,
+                    pool_key=compute_pool_key(self._pool_key_params(params, machine_type)),
+                    vm_dir=vm_dir,
+                    batch_job_path=f"projects/{params['project_id']}/locations/{params['region']}/jobs/{ajs.job_id}",
+                    # created_at is unknown after a restart; stamping now
+                    # overstates the remaining lifetime, which is safe because
+                    # VM death detection covers an earlier-than-expected exit.
+                    created_at=now,
+                    lifetime_seconds=int(convert_duration_to_seconds(params["pool_max_vm_lifetime"]).rstrip("s")),
+                    idle_ttl_seconds=int(params["pool_ttl_seconds"]),
+                    state=VMState.BUSY,
+                    current_galaxy_job_id=str(job.id),
+                )
+            )
+        self._set_pooled_state(
+            ajs, params, ajs.job_id, vm_dir, claim_deadline=now + int(params["pool_claim_timeout_seconds"])
+        )
+        log.info("Reattached recovered job %s to pooled VM %s", job.id, ajs.job_id)

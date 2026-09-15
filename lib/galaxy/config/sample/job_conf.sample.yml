@@ -374,6 +374,53 @@ runners:
     # If Pulsar needs to talk to Galaxy at a particular host and port, set that here.
     #galaxy_url: <galaxy_url>
 
+  # Run jobs directly against Google Cloud Platform's Batch service (no Pulsar).
+  # Requires a shared NFS filesystem reachable from both the Galaxy server and
+  # the Batch VMs, mounted at the same absolute path on both.
+  # - https://cloud.google.com/batch/docs/get-started
+  #gcp_batch:
+  #  load: galaxy.jobs.runners.gcp_batch:GoogleCloudBatchJobRunner
+  #  # GCP project and region jobs are submitted to. project_id defaults to the
+  #  # project of the active credentials.
+  #  #project_id: <gcp_project_id>
+  #  #region: us-central1
+  #  # Service account the Batch VMs run as.
+  #  #service_account_email: <sa@project.iam.gserviceaccount.com>
+  #  # Path to a service account key file for the Galaxy-side client (optional
+  #  # if application default credentials are configured).
+  #  #service_account_file: /path/to/key.json
+  #  # NFS volumes mounted on the Batch VMs: "server:/remote_path:/mount_path[:ro],..."
+  #  # The first volume's mount_path must equal the Galaxy-side path of the
+  #  # shared filesystem so job script paths resolve on both sides.
+  #  #gcp_batch_volumes: "10.0.0.1:/export:/galaxy/server/database"
+  #  # Seconds between GCP Batch API status polls per job.
+  #  #polling_interval: 30
+  #  #
+  #  # Warm VM pool: keep Batch VMs alive after a job finishes and hand
+  #  # follow-up jobs to them over the shared NFS mount, avoiding the multi-
+  #  # minute VM provisioning cost per job. Only containerized jobs
+  #  # (use_container: true, the default) are pooled. Disabled by default;
+  #  # with pool_enabled false the runner behaves exactly as without the pool.
+  #  # All pool params can be overridden per destination.
+  #  #pool_enabled: false
+  #  # Idle seconds before a pooled VM shuts itself down. Idle VMs bill until
+  #  # then, so this is the cost/latency trade-off knob.
+  #  #pool_ttl_seconds: 300
+  #  # Maximum idle VMs retained per handler (running jobs are not capped).
+  #  #pool_max_size: 5
+  #  # Total lifetime of a pooled VM (Batch max_run_duration; spans all jobs on
+  #  # the VM plus idle time). IMPORTANT: a job is only sent to a pooled VM if
+  #  # the VM's remaining lifetime covers the job's walltime, so keep job
+  #  # walltime/max_run_duration well below this value or VMs will never be
+  #  # reused.
+  #  #pool_max_vm_lifetime: 24h
+  #  # Seconds to wait for a booted VM to claim a handed-off job before
+  #  # resubmitting it as a fresh (non-pooled handoff) Batch job.
+  #  #pool_claim_timeout_seconds: 60
+  #  # Handoff directory on the shared mount; defaults to
+  #  # <first gcp_batch_volume mount_path>/.galaxy-vm-pool
+  #  #pool_dir: /galaxy/server/database/.galaxy-vm-pool
+
 
 # Job handler configuration - for a full discussion of job handlers, see the documentation at:
 #     https://docs.galaxyproject.org/en/latest/admin/scaling.html
