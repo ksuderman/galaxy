@@ -1,11 +1,15 @@
 import os
+import re
 from contextlib import contextmanager
 from shutil import rmtree
 from tempfile import mkdtemp
 
 import pytest
 
-from galaxy.dependencies import ConditionalDependencies
+from galaxy.dependencies import (
+    ConditionalDependencies,
+    optional,
+)
 
 AZURE_BLOB_TEST_CONFIG = """<object_store type="azure_blob">
     blah...
@@ -26,6 +30,8 @@ FILES_SOURCES_CONFIG = """
 - type: dropbox
 - type: googledrive
 - type: irods
+- type: gitlab
+- type: arc
 """
 JOB_CONF_YAML = """
 runners:
@@ -39,6 +45,12 @@ runners:
 """
 VAULT_CONF_HASHICORP = """
 type: hashicorp
+"""
+TOOL_SHED_CONFIG = """
+tool_shed:
+  sentry_dsn: https://public@sentry.example.com/1
+  database_connection: postgresql://ts:ts@localhost/toolshed
+  watch_tools: auto
 """
 
 
@@ -84,6 +96,7 @@ def test_fs_default():
         assert not cds.check_gdrive_fsspec()
         assert not cds.check_dropboxdrivefs()
         assert not cds.check_webdav4()
+        assert not cds.check_arcfs_fsspec()
 
 
 def test_fs_configured():
@@ -96,6 +109,7 @@ def test_fs_configured():
         assert cds.check_gdrive_fsspec()
         assert cds.check_dropboxdrivefs()
         assert cds.check_webdav4()
+        assert cds.check_arcfs_fsspec()
         assert cds.check_fs_irods()
 
 
@@ -199,6 +213,35 @@ def test_conditional_redis(config, expected):
     with _config_context() as cc:
         cds = cc.get_cond_deps(config=config)
         assert cds.check_redis() is expected
+
+
+def test_tool_shed_config_selects_dependencies():
+    with _config_context() as cc:
+        config_file = cc.write_config("tool_shed.yml", TOOL_SHED_CONFIG)
+        assert "sentry-sdk" in _requirement_names(optional(config_file, app="tool_shed"))
+
+
+def test_tool_shed_config_ignored_when_read_as_galaxy():
+    with _config_context() as cc:
+        config_file = cc.write_config("tool_shed.yml", TOOL_SHED_CONFIG)
+        assert "sentry-sdk" not in _requirement_names(optional(config_file))
+
+
+def test_tool_shed_skips_galaxy_only_dependencies():
+    with _config_context() as cc:
+        config_file = cc.write_config("tool_shed.yml", TOOL_SHED_CONFIG)
+        names = _requirement_names(optional(config_file, app="tool_shed"))
+        assert "psycopg2-binary" in names
+        assert "watchdog" not in names
+
+
+def test_optional_rejects_unknown_app():
+    with pytest.raises(ValueError, match="Unknown app"):
+        optional(app="reports")
+
+
+def _requirement_names(requirements):
+    return {re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].strip() for requirement in requirements}
 
 
 @contextmanager

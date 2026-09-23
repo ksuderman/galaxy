@@ -12,6 +12,7 @@ from typing import (
     cast,
     Literal,
     TYPE_CHECKING,
+    Union,
 )
 from uuid import UUID
 
@@ -40,13 +41,18 @@ from galaxy.managers import (
     sharable,
 )
 from galaxy.managers.base import (
+    apply_sort_column,
     combine_lists,
     ModelDeserializingError,
     Serializer,
+    sort_expression,
     SortableManager,
     StorageCleanerManager,
 )
-from galaxy.managers.context import ProvidesUserContext
+from galaxy.managers.context import (
+    ProvidesHistoryContext,
+    ProvidesUserContext,
+)
 from galaxy.managers.export_tracker import StoreExportTracker
 from galaxy.model import (
     History,
@@ -59,6 +65,7 @@ from galaxy.model.index_filter_util import (
     tag_filter,
     text_column_filter,
 )
+from galaxy.objectstore import ObjectStoreAuth
 from galaxy.schema.fields import Security
 from galaxy.schema.history import HistoryIndexQueryPayload
 from galaxy.schema.schema import (
@@ -86,9 +93,16 @@ from galaxy.util.search import (
     parse_filters_structured,
     RawTextTerm,
 )
+from galaxy.work.context import SessionRequestContext
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import ScalarResult
+
+    from galaxy.webapps.base.webapp import GalaxyWebTransaction
+
+# "Current history" is a request/session-scoped concept: only trans objects backed by
+# a session (FastAPI SessionRequestContext) or the legacy web transaction implement it.
+CurrentHistoryContext = Union[SessionRequestContext, "GalaxyWebTransaction"]
 
 log = logging.getLogger(__name__)
 
@@ -228,12 +242,9 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
         sort_column: Any
         if payload.sort_by == "username":
             sort_column = model.User.username
-            stmt = stmt.add_columns(sort_column)
         else:
             sort_column = getattr(model.History, payload.sort_by)
-        if payload.sort_desc:
-            sort_column = sort_column.desc()
-        stmt = stmt.order_by(sort_column)
+        stmt = apply_sort_column(stmt, sort_column, payload.sort_desc, model.History.id)
 
         if payload.limit is not None:
             stmt = stmt.limit(payload.limit)
@@ -320,14 +331,14 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
     # def is_current_users_current_history( self, history, trans ):
     #     pass
 
-    def get_current(self, trans):
+    def get_current(self, trans: CurrentHistoryContext):
         """
         Return the current history.
         """
         # TODO: trans
         return trans.get_history()
 
-    def set_current(self, trans, history):
+    def set_current(self, trans: CurrentHistoryContext, history):
         """
         Set the current history.
         """
@@ -335,7 +346,7 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
         trans.set_history(history)
         return history
 
-    def set_current_by_id(self, trans, history_id):
+    def set_current_by_id(self, trans: CurrentHistoryContext, history_id):
         """
         Set the current history by an id.
         """
@@ -355,9 +366,9 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
         if order_by_string == "update_time-asc":
             return asc(self.model_class.update_time)
         if order_by_string in ("name", "name-asc"):
-            return asc(self.model_class.name)
+            return asc(sort_expression(self.model_class.name))
         if order_by_string == "name-dsc":
-            return desc(self.model_class.name)
+            return desc(sort_expression(self.model_class.name))
         # TODO: history columns
         if order_by_string in ("size", "size-dsc"):
             return desc(self.model_class.disk_size)
@@ -381,16 +392,18 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
         stmt = select(Job).where(Job.history == history).where(Job.state.in_(Job.non_ready_states))
         return self.session().scalars(stmt)
 
-    def queue_history_import(self, trans, archive_type, archive_source, target_history=None):
+    def queue_history_import(self, trans: ProvidesHistoryContext, archive_type, archive_source, target_history=None):
         # Run job to do import.
         history_imp_tool = trans.app.toolbox.get_tool("__IMPORT_HISTORY__")
+        assert history_imp_tool is not None
+        history_imp_tool = trans.app.toolbox.materialize_tool(history_imp_tool, reason="execution")
         incoming = {"__ARCHIVE_SOURCE__": archive_source, "__ARCHIVE_TYPE__": archive_type}
         job, *_ = history_imp_tool.execute(trans, incoming=incoming, history=target_history)
         trans.app.job_manager.enqueue(job, tool=history_imp_tool)
         return job
 
     # TODO: remove this function when the legacy endpoint using it is removed
-    def legacy_serve_ready_history_export(self, trans, jeha):
+    def legacy_serve_ready_history_export(self, trans: "GalaxyWebTransaction", jeha):
         assert jeha.ready
         if jeha.compressed:
             trans.response.set_content_type("application/x-gzip")
@@ -398,19 +411,26 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
             trans.response.set_content_type("application/x-tar")
         disposition = f'attachment; filename="{jeha.export_name}"'
         trans.response.headers["Content-Disposition"] = disposition
-        archive = trans.app.object_store.get_filename(jeha.dataset)
+        archive = trans.app.object_store.get_filename(jeha.dataset, auth=ObjectStoreAuth(user=trans.user))
         return open(archive, mode="rb")
 
-    def get_ready_history_export_file_path(self, trans, jeha) -> str:
+    def get_ready_history_export_file_path(self, trans: ProvidesUserContext, jeha) -> str:
         """
         Serves the history export archive for use as a streaming response so the file
         doesn't need to be loaded into memory.
         """
         assert jeha.ready
-        return trans.app.object_store.get_filename(jeha.dataset)
+        return trans.app.object_store.get_filename(jeha.dataset, auth=ObjectStoreAuth(user=trans.user))
 
     def queue_history_export(
-        self, trans, history, gzip=True, include_hidden=False, include_deleted=False, directory_uri=None, file_name=None
+        self,
+        trans: ProvidesHistoryContext,
+        history,
+        gzip=True,
+        include_hidden=False,
+        include_deleted=False,
+        directory_uri=None,
+        file_name=None,
     ):
         # Convert options to booleans.
         if isinstance(gzip, str):
@@ -436,12 +456,19 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
 
         # Run job to do export.
         history_exp_tool = trans.app.toolbox.get_tool(export_tool_id)
+        assert history_exp_tool is not None
+        history_exp_tool = trans.app.toolbox.materialize_tool(history_exp_tool, reason="execution")
         job, *_ = history_exp_tool.execute(trans, incoming=params, history=history)
         trans.app.job_manager.enqueue(job, tool=history_exp_tool)
         return job
 
     def get_sharing_extra_information(
-        self, trans, item, users: set[model.User], errors: set[str], option: sharable.SharingOptions | None = None
+        self,
+        trans: ProvidesUserContext,
+        item,
+        users: set[model.User],
+        errors: set[str],
+        option: sharable.SharingOptions | None = None,
     ) -> ShareHistoryExtra:
         """Returns optional extra information about the datasets of the history that can be accessed by the users."""
         extra = ShareHistoryExtra()
@@ -504,7 +531,7 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
         )
         return bool(self.session().scalar(stmt))
 
-    def make_members_public(self, trans, item):
+    def make_members_public(self, trans: ProvidesUserContext, item):
         """Make the non-purged datasets in history public.
         Performs permissions check.
         """
@@ -518,6 +545,44 @@ class HistoryManager(sharable.SharableModelManager[model.History], deletable.Pur
                         log.warning(f"Unable to make dataset with id: {dataset.id} public")
                 else:
                     log.warning(f"User without permissions tried to make dataset with id: {dataset.id} public")
+
+    def make_private(self, trans: ProvidesUserContext, histories: list[model.History]) -> int:
+        """Make the datasets in ``histories`` private and set private default permissions.
+
+        Permissions live on the dataset, not on the history association, so a
+        dataset that the user cannot manage (typically one shared from another
+        user's history through an import) is left untouched. Returns the number
+        of such datasets that stayed shared.
+        """
+        user = trans.user
+        assert user
+        security_agent = self.app.security_agent
+        private_role = security_agent.get_private_user_role(user)
+        private_permissions = {
+            security_agent.permitted_actions.DATASET_MANAGE_PERMISSIONS: [private_role],
+            security_agent.permitted_actions.DATASET_ACCESS: [private_role],
+        }
+        user_roles = user.all_roles()
+        seen_datasets: set[int] = set()
+        skipped_datasets: set[int] = set()
+
+        for history in histories:
+            security_agent.history_set_default_permissions(history, private_permissions)
+            for hda in history.datasets:
+                dataset = hda.dataset
+                assert dataset
+                if dataset.id in seen_datasets:
+                    continue
+                seen_datasets.add(dataset.id)
+                if dataset.library_associations or security_agent.dataset_is_private_to_user(trans, dataset):
+                    continue
+                if not security_agent.can_manage_dataset(user_roles, dataset):
+                    skipped_datasets.add(dataset.id)
+                    continue
+                security_agent.set_all_dataset_permissions(dataset, private_permissions, flush=False)
+
+        self.session().commit()
+        return len(skipped_datasets)
 
     def archive_history(self, history: model.History, archive_export_id: int | None):
         """Marks the history with the given id as archived and optionally associates it with the given archive export record.
@@ -685,7 +750,9 @@ class HistoryExportManager:
         self.app = app
         self.export_tracker = export_tracker
 
-    def get_task_exports(self, trans, history_id: int, limit: int | None = None, offset: int | None = None):
+    def get_task_exports(
+        self, trans: ProvidesHistoryContext, history_id: int, limit: int | None = None, offset: int | None = None
+    ):
         """Returns task-based exports associated with this history"""
         history = self._history(trans, history_id)
         export_associations = self.export_tracker.get_object_exports(
@@ -758,17 +825,18 @@ class HistoryExportManager:
             "export_metadata": export_metadata,
         }
 
-    def get_exports(self, trans, history_id: int):
+    def get_exports(self, trans: ProvidesHistoryContext, history_id: int):
         """Returns job-based exports associated with this history"""
         history = self._history(trans, history_id)
         matching_exports = history.exports
         return [self.serialize(trans, history_id, e) for e in matching_exports]
 
-    def serialize(self, trans, history_id: int, jeha: model.JobExportHistoryArchive) -> dict:
+    def serialize(self, trans: ProvidesHistoryContext, history_id: int, jeha: model.JobExportHistoryArchive) -> dict:
         rval = jeha.to_dict()
         rval["type"] = "job"
         encoded_jeha_id = Security.security.encode_id(jeha.id)
         encoded_history_id = Security.security.encode_id(history_id)
+        assert trans.url_builder
         api_url = trans.url_builder("history_archive_download", history_id=encoded_history_id, jeha_id=encoded_jeha_id)
         external_url = trans.url_builder(
             "history_archive_download", history_id=encoded_history_id, jeha_id="latest", qualified=True
@@ -782,7 +850,9 @@ class HistoryExportManager:
         rval = trans.security.encode_all_ids(rval)
         return rval
 
-    def get_ready_jeha(self, trans, history_id: int, jeha_id: int | Literal["latest"] = "latest"):
+    def get_ready_jeha(
+        self, trans: ProvidesHistoryContext, history_id: int, jeha_id: int | Literal["latest"] = "latest"
+    ):
         history = self._history(trans, history_id)
         matching_exports = history.exports
         if jeha_id != "latest":
@@ -796,7 +866,7 @@ class HistoryExportManager:
 
         return jeha
 
-    def _history(self, trans, history_id: int) -> model.History:
+    def _history(self, trans: ProvidesHistoryContext, history_id: int) -> model.History:
         history = self.app.history_manager.get_accessible(history_id, trans.user, current_history=trans.history)
         return history
 
@@ -994,7 +1064,7 @@ class HistorySerializer(sharable.SharableModelSerializer, deletable.PurgableSeri
 
         return state
 
-    def serialize_contents(self, item, key, trans=None, user=None, **context):
+    def serialize_contents(self, item, key, trans: ProvidesHistoryContext | None = None, user=None, **context):
         history = item
         returned = []
         for content in self.manager.contents_manager._union_of_contents_query(history).all():
@@ -1004,7 +1074,7 @@ class HistorySerializer(sharable.SharableModelSerializer, deletable.PurgableSeri
             returned.append(serialized)
         return returned
 
-    def serialize_contents_states(self, item, key, trans=None, **context):
+    def serialize_contents_states(self, item, key, trans: ProvidesHistoryContext | None = None, **context):
         """
         Return a dictionary containing the counts of all contents in each state
         keyed by the distinct states.
@@ -1052,7 +1122,7 @@ class HistoryDeserializer(sharable.SharableModelDeserializer, deletable.Purgable
     def deserialize_preferred_object_store_id(self, item, key, val, **context):
         preferred_object_store_id = val
         validation_error = validate_preferred_object_store_id(
-            context["trans"], self.app.object_store, preferred_object_store_id
+            context["trans"].user, self.app.object_store, preferred_object_store_id
         )
         if validation_error:
             raise ModelDeserializingError(validation_error)

@@ -6,7 +6,10 @@ from functools import (
     wraps,
 )
 from multiprocessing import get_context
-from threading import local
+from threading import (
+    local,
+    Lock,
+)
 from typing import (
     Any,
 )
@@ -43,6 +46,13 @@ MAIN_TASK_MODULE = "galaxy.celery.tasks"
 DEFAULT_TASK_QUEUE = "galaxy.internal"
 TASKS_MODULES = [MAIN_TASK_MODULE]
 PYDANTIC_AWARE_SERIALIZER_NAME = "pydantic-aware-json"
+# task_serializer also serializes control (pidbox) replies, which echo task arguments.
+CELERY_APP_DEFAULTS: dict[str, Any] = {
+    "task_default_queue": DEFAULT_TASK_QUEUE,
+    "task_create_missing_queues": True,
+    "task_serializer": PYDANTIC_AWARE_SERIALIZER_NAME,
+    "timezone": "UTC",
+}
 
 APP_LOCAL = local()
 
@@ -51,7 +61,7 @@ serialization.register(
 )
 
 
-class GalaxyCelery(Celery):
+class GalaxyCelery(Celery):  # type: ignore[misc]  # celery is untyped
     fork_pool: pebble.ProcessPool
 
     def __init__(self, *args, **kwargs):
@@ -72,7 +82,7 @@ class GalaxyCelery(Celery):
         return module
 
 
-class GalaxyTask(Task):
+class GalaxyTask(Task):  # type: ignore[misc]  # celery is untyped
     """
     Custom celery task used to enforce per-user rate limits and
     concurrency limits on task executions.
@@ -112,19 +122,32 @@ def get_galaxy_app():
     return build_app()
 
 
-@lru_cache(maxsize=1)
-def build_app():
-    if kwargs := get_app_properties():
-        kwargs["check_migrate_databases"] = False
-        kwargs["use_display_applications"] = False
-        kwargs["use_converters"] = True
-        import galaxy.app
+_build_app_lock = Lock()
+_built_app = None
 
-        galaxy_app = galaxy.app.GalaxyManagerApplication(configure_logging=False, **kwargs)
-        # GalaxyManagerApplication has no toolbox, so the converter tools the async
-        # execution path relies on must be loaded directly into the datatypes registry.
-        galaxy_app.datatypes_registry.load_datatype_converters_without_toolbox(galaxy_app)
-        return galaxy_app
+
+def build_app():
+    # Build the app under a double-checked lock so that a cold start with N
+    # concurrent threads (celery ``--pool threads``) builds exactly one app; the
+    # losing threads wait on the lock and reuse the winner's result.
+    global _built_app
+    if _built_app is not None:
+        return _built_app
+    with _build_app_lock:
+        if _built_app is not None:
+            return _built_app
+        if kwargs := get_app_properties():
+            kwargs["check_migrate_databases"] = False
+            kwargs["use_display_applications"] = False
+            kwargs["use_converters"] = True
+            import galaxy.app
+
+            galaxy_app = galaxy.app.GalaxyManagerApplication(configure_logging=False, **kwargs)
+            # GalaxyManagerApplication has no toolbox, so the converter tools the async
+            # execution path relies on must be loaded directly into the datatypes registry.
+            galaxy_app.datatypes_registry.load_datatype_converters_without_toolbox(galaxy_app)
+            _built_app = galaxy_app
+    return _built_app
 
 
 @lru_cache(maxsize=1)
@@ -226,13 +249,7 @@ def galaxy_task(*args, action=None, **celery_task_kwd):
 
 
 def init_celery_app():
-    celery_app_kwd: dict[str, Any] = {
-        "include": TASKS_MODULES,
-        "task_default_queue": DEFAULT_TASK_QUEUE,
-        "task_create_missing_queues": True,
-        "timezone": "UTC",
-    }
-    celery_app = GalaxyCelery("galaxy", **celery_app_kwd)
+    celery_app = GalaxyCelery("galaxy", include=TASKS_MODULES, **CELERY_APP_DEFAULTS)
     celery_app.set_default()
     config = get_config()
     config_celery_app(config, celery_app)

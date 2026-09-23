@@ -1,9 +1,9 @@
 import json
 import logging
 import os
-import re
 from abc import abstractmethod
 from collections.abc import (
+    Iterable,
     Mapping,
     MutableMapping,
 )
@@ -24,7 +24,14 @@ from galaxy.exceptions import (
     ToolInputsNotReadyException,
 )
 from galaxy.job_execution.actions.post import ActionBox
-from galaxy.managers.context import ProvidesHistoryContext
+from galaxy.job_execution.output_format import (
+    get_ext_or_implicit_ext,
+    resolve_format_source,
+)
+from galaxy.managers.context import (
+    ProvidesHistoryContext,
+    ProvidesUserContext,
+)
 from galaxy.model import (
     Dataset,
     History,
@@ -79,6 +86,7 @@ if TYPE_CHECKING:
     )
     from galaxy.tool_util.parser.output_objects import ToolOutput
     from galaxy.tools import Tool
+    from galaxy.webapps.base.webapp import GalaxyWebTransaction
 
 log = logging.getLogger(__name__)
 
@@ -93,11 +101,22 @@ class ToolAction:
     been converted and validated).
     """
 
+    produces_real_jobs: bool
+    file_source_uri_discovery_complete = False
+
+    def has_complete_file_source_uri_discovery(self) -> bool:
+        """Return whether this concrete action has audited URI discovery."""
+        return type(self).__dict__.get("file_source_uri_discovery_complete", False)
+
+    def iter_referenced_file_source_uris(self, param_dict: ToolStateJobInstancePopulatedT) -> Iterable[str]:
+        """Yield file source URIs embedded in action-specific parameters."""
+        return ()
+
     @abstractmethod
     def execute(
         self,
         tool: "Tool",
-        trans,
+        trans: ProvidesHistoryContext,
         incoming: ToolStateJobInstancePopulatedT | None = None,
         history: History | None = None,
         job_params=None,
@@ -122,7 +141,7 @@ class ToolAction:
         dataset=None,
         tool=None,
         on_text=None,
-        trans=None,
+        trans: ProvidesHistoryContext | None = None,
         incoming=None,
         history=None,
         params=None,
@@ -135,6 +154,7 @@ class DefaultToolAction(ToolAction):
     """Default tool action is to run an external command"""
 
     produces_real_jobs: bool = True
+    file_source_uri_discovery_complete = True
 
     def _collect_input_datasets(
         self,
@@ -398,10 +418,12 @@ class DefaultToolAction(ToolAction):
         tool.visit_inputs(param_values, visitor)
         return input_dataset_collections
 
-    def _check_access(self, tool, trans):
+    def _check_access(self, tool, trans: ProvidesUserContext):
         assert tool.allow_user_access(trans.user), f"User ({trans.user}) is not allowed to access this tool."
 
-    def _collect_inputs(self, tool, trans, incoming, history, current_user_roles, collection_info):
+    def _collect_inputs(
+        self, tool, trans: ProvidesHistoryContext, incoming, history, current_user_roles, collection_info
+    ):
         """Collect history as well as input datasets and collections."""
         # Set history.
         if not history:
@@ -442,7 +464,7 @@ class DefaultToolAction(ToolAction):
     def execute(
         self,
         tool: "Tool",
-        trans,
+        trans: ProvidesHistoryContext,
         incoming: ToolStateJobInstancePopulatedT | None = None,
         history: History | None = None,
         job_params=None,
@@ -797,7 +819,7 @@ class DefaultToolAction(ToolAction):
             job.info = f"Redirected to: {redirect_url}"
             trans.sa_session.add(job)
             trans.sa_session.commit()
-            trans.response.send_redirect(redirect_url)
+            cast("GalaxyWebTransaction", trans).response.send_redirect(redirect_url)
         else:
             if flush_job:
                 # Set HID and add to history.
@@ -920,7 +942,7 @@ class DefaultToolAction(ToolAction):
 
     def _wrapped_params(
         self,
-        trans,
+        trans: ProvidesHistoryContext,
         tool: "Tool",
         incoming: "ToolStateJobInstancePopulatedT",
         input_datasets: LegacyUnprefixedDict | None = None,
@@ -950,7 +972,7 @@ class DefaultToolAction(ToolAction):
         return on_text_for_dataset_and_collections(dataset_hids=input_hids, collection_hids=collection_hids)
 
     def _new_job_for_session(
-        self, trans, tool: "Tool", history: History | None
+        self, trans: ProvidesHistoryContext, tool: "Tool", history: History | None
     ) -> tuple[Job, model.GalaxySession | None]:
         job = Job()
         job.galaxy_version = trans.app.config.version_major
@@ -995,7 +1017,7 @@ class DefaultToolAction(ToolAction):
             )
             sa_session.add(association)
 
-    def _record_inputs(self, trans, tool, job, incoming, inp_data, inp_dataset_collections):
+    def _record_inputs(self, trans: ProvidesHistoryContext, tool, job, incoming, inp_data, inp_dataset_collections):
         # FIXME: Don't need all of incoming here, just the defined parameters
         #        from the tool. We need to deal with tools that pass all post
         #        parameters to the command as a special case.
@@ -1070,7 +1092,7 @@ class DefaultToolAction(ToolAction):
             job.add_output_dataset_collection(name, dataset_collection_instance)
             dataset_collection_instance.job = job
 
-    def _record_input_datasets(self, trans, job, inp_data):
+    def _record_input_datasets(self, trans: ProvidesHistoryContext, job, inp_data):
         for name, dataset in inp_data.items():
             # TODO: figure out why can't pass dataset_id here.
             job.add_input_dataset(name, dataset=dataset)
@@ -1081,7 +1103,7 @@ class DefaultToolAction(ToolAction):
         dataset=None,
         tool=None,
         on_text=None,
-        trans=None,
+        trans: ProvidesHistoryContext | None = None,
         incoming=None,
         history=None,
         params=None,
@@ -1104,7 +1126,16 @@ class DefaultToolAction(ToolAction):
             )
 
     def _get_default_data_name(
-        self, dataset, tool, on_text=None, trans=None, incoming=None, history=None, params=None, job_params=None, **kwd
+        self,
+        dataset,
+        tool,
+        on_text=None,
+        trans: ProvidesHistoryContext | None = None,
+        incoming=None,
+        history=None,
+        params=None,
+        job_params=None,
+        **kwd,
     ):
         name = tool.name
         if on_text:
@@ -1122,7 +1153,7 @@ class OutputCollections:
 
     def __init__(
         self,
-        trans,
+        trans: ProvidesHistoryContext,
         history,
         tool,
         tool_action,
@@ -1146,8 +1177,8 @@ class OutputCollections:
         self.incoming = incoming
         self.params = params
         self.job_params = job_params
-        self.out_collections = {}
-        self.out_collection_instances = {}
+        self.out_collections: dict[str, DatasetCollection] = {}
+        self.out_collection_instances: dict[str, HistoryDatasetCollectionAssociation] = {}
         self.tags = tags  # all inherited tags
         self.hdca_tags = hdca_tags  # only tags inherited from input HDCAs
 
@@ -1245,16 +1276,6 @@ class OutputCollections:
             self.out_collection_instances[name] = hdca
 
 
-def get_ext_or_implicit_ext(hda):
-    if hda.implicitly_converted_parent_datasets:
-        # implicitly_converted_parent_datasets is a list of ImplicitlyConvertedDatasetAssociation
-        # objects, and their type is the target_ext, so this should be correct even if there
-        # are multiple ImplicitlyConvertedDatasetAssociation objects (meaning 2 datasets had been converted
-        # to produce a dataset with the required datatype)
-        return hda.implicitly_converted_parent_datasets[0].type
-    return hda.ext
-
-
 def determine_output_format(
     output: "ToolOutput",
     parameter_context,
@@ -1283,51 +1304,8 @@ def determine_output_format(
                 pass
         ext = random_input_ext
     format_source = output.format_source
-    if format_source is not None and format_source in input_datasets:
-        try:
-            input_dataset = input_datasets[output.format_source]
-            ext = get_ext_or_implicit_ext(input_dataset)
-        except Exception:
-            pass
-    elif format_source is not None:
-        element_index = None
-        collection_name = format_source
-        if re.match(r"^[^\[\]]*\[[^\[\]]*\]$", format_source):
-            collection_name, element_index = format_source[0:-1].split("[")
-            # Treat as json to interpret "forward" vs 0 with type
-            # Make it feel more like Python, single quote better in XML also.
-            element_index = element_index.replace("'", '"')
-            element_index = json.loads(element_index)
-
-        if collection_name in input_dataset_collections:
-            try:
-                input_collection = input_dataset_collections[collection_name]
-                input_collection_collection = input_collection.collection
-                if element_index is None:
-                    # just pick the first HDA
-                    input_dataset = input_collection_collection.dataset_instances[0]
-                else:
-                    try:
-                        input_element = input_collection_collection[element_index]
-                    except KeyError:
-                        if execution_cache:
-                            dataset_elements = execution_cache.cached_collection_elements.get(
-                                input_collection_collection.id
-                            )
-                            if dataset_elements is None:
-                                dataset_elements = execution_cache.cached_collection_elements[
-                                    input_collection_collection.id
-                                ] = input_collection_collection.dataset_elements
-                        else:
-                            dataset_elements = input_collection_collection.dataset_elements
-                        for element in dataset_elements:
-                            if element.element_identifier == element_index:
-                                input_element = element
-                                break
-                    input_dataset = input_element.element_object
-                ext = get_ext_or_implicit_ext(input_dataset)
-            except Exception as e:
-                log.debug("Exception while trying to determine format_source: %s", e)
+    if format_source is not None:
+        ext = resolve_format_source(format_source, input_datasets, input_dataset_collections, ext, execution_cache)
 
     # process change_format tags
     if output.change_format:

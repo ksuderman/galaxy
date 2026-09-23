@@ -3,14 +3,16 @@ import { mount } from "@vue/test-utils";
 import flushPromises from "flush-promises";
 import { http, HttpResponse } from "msw";
 import { createPinia, setActivePinia } from "pinia";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, ref } from "vue";
 
 import { useServerMock } from "@/api/client/__mocks__";
 import type { PreparedUpload } from "@/components/Panels/Upload/types";
 import { useUploadState } from "@/components/Panels/Upload/uploadState";
 import { makeCollectionConfig, makeLibraryItem, makeUrlItem } from "@/composables/upload/testHelpers/uploadFixtures";
+import { useUploadBatchOperations } from "@/composables/upload/useUploadBatchOperations";
 import { buildPreparedUpload } from "@/utils/upload";
+import * as uploadUtils from "@/utils/upload";
 
 import { useUploadSubmission } from "./useUploadSubmission";
 
@@ -122,6 +124,30 @@ describe("useUploadSubmission", () => {
         expect(libraryEntry?.progress).toBe(100);
     });
 
+    it("preserves every dataset from standalone URL uploads", async () => {
+        let requestCount = 0;
+        server.use(
+            http.post("/api/tools/fetch", () => {
+                requestCount += 1;
+                return HttpResponse.json({
+                    outputs: [{ id: `hda_url_${requestCount}`, name: `url-${requestCount}.txt`, src: "hda" }],
+                });
+            }),
+        );
+
+        const firstItem = makeUrlItem({ name: "first.txt", url: "https://example.org/first.txt" });
+        const secondItem = makeUrlItem({ name: "second.txt", url: "https://example.org/second.txt" });
+        const wrapper = mountHarness(buildPreparedUpload([firstItem, secondItem]));
+        await flushPromises();
+
+        await wrapper.find(SELECTORS.RUN).trigger("click");
+        await flushPromises();
+
+        expect(wrapper.find(SELECTORS.RESULT).text()).toContain('"id":"hda_url_1"');
+        expect(wrapper.find(SELECTORS.RESULT).text()).toContain('"id":"hda_url_2"');
+        expect(useUploadState().activeItems.value.every((item) => item.status === "completed")).toBe(true);
+    });
+
     it("marks all tracked uploads as errored when the fetch request fails", async () => {
         server.use(
             http.post("/api/tools/fetch", () => HttpResponse.json({ err_msg: "upload failed" }, { status: 500 })),
@@ -172,6 +198,33 @@ describe("useUploadSubmission", () => {
 
         expect(wrapper.find(SELECTORS.RESULT).text()).toContain('"name":"fallback-name.txt"');
         expect(wrapper.find(SELECTORS.RESULT).text()).toContain('"id":"hda_3"');
+    });
+
+    it("resolves the submission promise promptly when a tracked upload is cancelled", async () => {
+        server.use(
+            http.post("/api/tools/fetch", async () => {
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                return HttpResponse.json({
+                    jobs: [{ id: "job_cancelled" }],
+                    outputs: [{ id: "hda_cancelled", name: "cancelled.txt", hid: 1, src: "hda" }],
+                });
+            }),
+        );
+
+        const apiItem = makeUrlItem({ name: "cancelled.txt", url: "https://example.org/cancelled.txt" });
+        const wrapper = mountHarness(buildPreparedUpload([apiItem]));
+        await flushPromises();
+
+        await wrapper.find(SELECTORS.RUN).trigger("click");
+        await flushPromises();
+
+        const itemId = useUploadState().activeItems.value[0]?.id;
+        expect(itemId).toBeDefined();
+        useUploadBatchOperations({ autoRecover: false }).cancelUpload(itemId!);
+
+        await vi.waitFor(() => expect(useUploadState().activeItems.value[0]?.status).toBe("cancelled"));
+        expect(wrapper.find(SELECTORS.RESULT).text()).toBe("");
+        expect(wrapper.find(SELECTORS.ERROR).text()).toBe("");
     });
 
     it("groups direct collection uploads into a batch in upload state", async () => {
@@ -338,5 +391,69 @@ describe("useUploadSubmission", () => {
         const batch = useUploadState().activeBatches.value[0];
         expect(batch?.status).toBe("error");
         expect(batch?.collectionId).toBeUndefined();
+    });
+
+    it("falls back to the default chunk size when the server config reports 0", async () => {
+        server.use(http.get("/api/configuration", () => HttpResponse.json({ chunk_upload_size: 0 })));
+
+        const uploadDatasetsSpy = vi.spyOn(uploadUtils, "uploadDatasets").mockResolvedValue(undefined);
+        const apiItem = makeUrlItem({ name: "remote.txt", url: "https://example.org/remote.txt" });
+        const wrapper = mountHarness({ apiItems: buildPreparedUpload([apiItem]).apiItems, uploadItems: [apiItem] });
+        await flushPromises();
+
+        await wrapper.find(SELECTORS.RUN).trigger("click");
+        await flushPromises();
+
+        expect(uploadDatasetsSpy).toHaveBeenCalled();
+        expect(uploadDatasetsSpy.mock.calls[0]?.[1]).toMatchObject({
+            chunkSize: 10485760,
+        });
+        uploadDatasetsSpy.mockRestore();
+    });
+
+    it("gives each standalone item its own AbortSignal instead of one shared for the whole submission", async () => {
+        const uploadDatasetsSpy = vi.spyOn(uploadUtils, "uploadDatasets").mockResolvedValue(undefined);
+
+        const firstItem = makeUrlItem({ name: "1.txt", url: "https://example.org/1.txt" });
+        const secondItem = makeUrlItem({ name: "2.txt", url: "https://example.org/2.txt" });
+        const prepared = buildPreparedUpload([firstItem, secondItem]);
+        const wrapper = mountHarness(prepared);
+        await flushPromises();
+
+        await wrapper.find(SELECTORS.RUN).trigger("click");
+        await flushPromises();
+
+        expect(uploadDatasetsSpy).toHaveBeenCalled();
+        const config = uploadDatasetsSpy.mock.calls[0]?.[1];
+
+        expect(config?.signal).toBeUndefined();
+        expect(config?.signals).toHaveLength(2);
+        // Each standalone item gets a distinct controller, so cancelling one can't abort the other.
+        expect(config?.signals?.[0]).not.toBe(config?.signals?.[1]);
+
+        uploadDatasetsSpy.mockRestore();
+    });
+
+    it("shares a single AbortSignal across every item in a collection batch", async () => {
+        const uploadCollectionDatasetsSpy = vi
+            .spyOn(uploadUtils, "uploadCollectionDatasets")
+            .mockResolvedValue(undefined);
+
+        const firstItem = makeUrlItem({ name: "1.bed", url: "https://example.org/1.bed" });
+        const secondItem = makeUrlItem({ name: "2.bed", url: "https://example.org/2.bed" });
+        const prepared = buildPreparedUpload([firstItem, secondItem], makeSubmissionCollectionConfig());
+        const wrapper = mountHarness(prepared);
+        await flushPromises();
+
+        await wrapper.find(SELECTORS.RUN).trigger("click");
+        await flushPromises();
+
+        expect(uploadCollectionDatasetsSpy).toHaveBeenCalled();
+        const config = uploadCollectionDatasetsSpy.mock.calls[0]?.[2];
+
+        expect(config?.signal).toBeInstanceOf(AbortSignal);
+        expect(config?.signals).toBeUndefined();
+
+        uploadCollectionDatasetsSpy.mockRestore();
     });
 });

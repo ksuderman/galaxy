@@ -8,6 +8,7 @@ import { ExternalIdentities } from "@/components/User/ExternalIdentities";
 import { hasSingleOidcProfile } from "@/components/User/ExternalIdentities/ExternalIDHelper";
 import AdminRoutes from "@/entry/analysis/routes/admin-routes";
 import LibraryRoutes from "@/entry/analysis/routes/library-routes";
+import LoginRoutes from "@/entry/analysis/routes/login-routes";
 import StorageRoutes from "@/entry/analysis/routes/storage-routes";
 import { getAppRoot } from "@/onload/loadConfig";
 import { requireAuth, requireAuthForUploadMethod } from "@/router/guards";
@@ -103,14 +104,11 @@ import WorkflowPublished from "@/components/Workflow/Published/WorkflowPublished
 import WorkflowRerun from "@/components/Workflow/Run/WorkflowRerun.vue";
 import WorkflowRun from "@/components/Workflow/Run/WorkflowRun.vue";
 import StoredWorkflowInvocations from "@/components/Workflow/StoredWorkflowInvocations.vue";
-import WorkflowCreate from "@/components/Workflow/WorkflowCreate.vue";
 import WorkflowExport from "@/components/Workflow/WorkflowExport.vue";
 import WorkflowImport from "@/components/Workflow/WorkflowImport.vue";
 import WorkflowInvocationState from "@/components/WorkflowInvocationState/WorkflowInvocationState.vue";
 import Analysis from "@/entry/analysis/modules/Analysis.vue";
 import Home from "@/entry/analysis/modules/Home.vue";
-import Login from "@/entry/analysis/modules/Login.vue";
-import Register from "@/entry/analysis/modules/Register.vue";
 import WorkflowEditorModule from "@/entry/analysis/modules/WorkflowEditor.vue";
 
 Vue.use(VueRouter);
@@ -145,14 +143,6 @@ function redirectAnon(redirect = "") {
     }
 }
 
-// redirect logged in users
-function redirectLoggedIn() {
-    const Galaxy = getGalaxyInstance();
-    if (Galaxy.user.id) {
-        return "/";
-    }
-}
-
 function redirectIf(condition, path) {
     if (condition) {
         return path;
@@ -165,18 +155,8 @@ export function getRouter(Galaxy) {
         base: getAppRoot(),
         mode: "history",
         routes: [
-            /** Login entry route */
-            {
-                path: "/login/start",
-                component: Login,
-                redirect: redirectLoggedIn(),
-            },
-            /** Registration entry route */
-            {
-                path: "/register/start",
-                component: Register,
-                redirect: redirectLoggedIn(),
-            },
+            /** Login and registration entry routes */
+            ...LoginRoutes,
             /** Workflow editor */
             {
                 path: "/workflows/edit",
@@ -819,11 +799,6 @@ export function getRouter(Galaxy) {
                         redirect: redirectAnon(),
                     },
                     {
-                        path: "workflows/create",
-                        component: WorkflowCreate,
-                        redirect: redirectAnon(),
-                    },
-                    {
                         path: "workflows/export",
                         component: WorkflowExport,
                         props: (route) => ({
@@ -981,21 +956,40 @@ export function getRouter(Galaxy) {
         return false;
     }
 
+    /** Checks for unsaved changes (e.g., in the workflow editor) before navigating.
+     * Prompts the user to confirm if there are unsaved changes.
+     * @returns true if navigation should proceed, false to abort.
+     */
+    function checkUnsavedChanges(router) {
+        if (!router.confirmation) {
+            return true;
+        }
+        if (confirm("There are unsaved changes which will be lost.")) {
+            router.confirmation = undefined;
+            return true;
+        }
+        return false;
+    }
+
     router.beforeEach(async (to, from, next) => {
         // TODO: merge anon redirect functionality here for more standard handling
+
+        if (!checkUnsavedChanges(router)) {
+            return next(false);
+        }
 
         const isAdminAccessRequired = checkAdminAccessRequired(to);
         if (isAdminAccessRequired) {
             const error = new Error(`Admin access required for '${to.path}'.`);
             error.name = "AdminRequired";
-            next(error);
+            return next(error);
         }
 
         const isRegisteredUserAccessRequired = checkRegisteredUserAccessRequired(to);
         if (isRegisteredUserAccessRequired) {
             const error = new Error(`Registered user access required for '${to.path}'.`);
             error.name = "RegisteredUserRequired";
-            next(error);
+            return next(error);
         }
         next();
     });

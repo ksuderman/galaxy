@@ -36,7 +36,6 @@ from galaxy.webapps.galaxy.api import (
     GalaxyASGIRequest,
     GalaxyASGIResponse,
     T,
-    UrlBuilder,
 )
 from tool_shed.context import (
     SessionRequestContext,
@@ -127,7 +126,6 @@ def get_trans(
     user=cast(User | None, Depends(get_user)),
     galaxy_session=cast(GalaxySession | None, Depends(get_session)),
 ) -> SessionRequestContext:
-    url_builder = UrlBuilder(request)
     galaxy_request = GalaxyASGIRequest(request)
     galaxy_response = GalaxyASGIResponse(response)
     return SessionRequestContextImpl(
@@ -136,7 +134,6 @@ def get_trans(
         galaxy_response,
         user=user,
         galaxy_session=galaxy_session,
-        url_builder=url_builder,
     )
 
 
@@ -353,7 +350,10 @@ def ensure_valid_session(trans: SessionRequestContext) -> None:
         galaxy_session = None
     # No relevant cookies, or couldn't find, or invalid, so create a new session
     if galaxy_session is None:
-        galaxy_session = create_new_session(trans, prev_galaxy_session, user_for_new_session)
+        # tool_shed.context.SessionRequestContext structurally satisfies everything
+        # create_new_session uses (.security, .app, .request) but is a distinct
+        # hierarchy from galaxy.webapps.base.webapp.GalaxyWebTransaction.
+        galaxy_session = create_new_session(trans, prev_galaxy_session, user_for_new_session)  # type: ignore[arg-type]
         galaxy_session_requires_flush = True
         trans.set_galaxy_session(galaxy_session)
         set_auth_cookie(trans, galaxy_session)

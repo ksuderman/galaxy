@@ -7,6 +7,7 @@ from typing import Any
 class GalaxyAppConfigurationAttributes:
     """Type annotations for schema-defined "galaxy" config attributes."""
 
+    server_name: str
     config_dir: str
     managed_config_dir: str
     data_dir: str
@@ -37,6 +38,10 @@ class GalaxyAppConfigurationAttributes:
     migrated_tools_config: str
     integrated_tool_panel_config: str
     tool_path: str
+    use_cached_toolbox: bool
+    cached_toolbox_cache_size: int
+    tool_source_database_connection: str | None
+    tool_source_stores: Any
     tool_dependency_dir: str | None
     dependency_resolvers_config_file: str
     conda_prefix: str | None
@@ -161,6 +166,7 @@ class GalaxyAppConfigurationAttributes:
     plausible_domain: str | None
     matomo_server: str | None
     matomo_site_id: str | None
+    matomo_disable_cookies: bool
     display_servers: str
     enable_old_display_applications: bool
     aws_estimate: bool
@@ -192,6 +198,7 @@ class GalaxyAppConfigurationAttributes:
     logo_url: str
     logo_src: str
     logo_src_secondary: str | None
+    subdomain_switcher: list[dict[str, str]]
     helpsite_url: str
     wiki_url: str
     quota_url: str
@@ -274,6 +281,7 @@ class GalaxyAppConfigurationAttributes:
     statsd_influxdb: bool
     statsd_mock_calls: bool
     queue_metrics_interval: int
+    enable_sse_connection_metrics: bool
     library_import_dir: str | None
     user_library_import_dir: str | None
     user_library_import_dir_auto_creation: bool
@@ -333,6 +341,7 @@ class GalaxyAppConfigurationAttributes:
     flush_per_n_datasets: int
     max_discovered_files: int
     history_local_serial_workflow_scheduling: bool
+    expression_evaluation_isolation_command: str
     enable_oidc: bool
     oidc_config_file: str
     oidc_backends_config_file: str
@@ -434,6 +443,8 @@ class GalaxyAppConfigurationAttributes:
     agent_model_capabilities_file: str
     gtn_database_path: str
     gtn_database_url: str
+    gtn_database_refresh_interval: int
+    iwc_manifest_refresh_interval: int
     enable_tool_recommendations: bool
     tool_recommendation_model_path: str
     topk_recommendations: int

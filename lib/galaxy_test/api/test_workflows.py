@@ -38,6 +38,7 @@ from galaxy_test.base.populators import (
     WorkflowPopulator,
 )
 from galaxy_test.base.workflow_fixtures import (
+    DEFAULT_FILE_DATASET_INPUT_LOCATION,
     NESTED_WORKFLOW_WITH_CONDITIONAL_SUBWORKFLOW_AND_DISCONNECTED_MAP_OVER_SOURCE,
     WORKFLOW_FLAT_CROSS_PRODUCT,
     WORKFLOW_INPUTS_AS_OUTPUTS,
@@ -73,6 +74,11 @@ from galaxy_test.base.workflow_fixtures import (
 )
 from ._framework import ApiTestCase
 from .sharable import SharingApiTests
+
+
+def _default_file_location(test_http_server) -> str:
+    return test_http_server.get_url(remote_url=DEFAULT_FILE_DATASET_INPUT_LOCATION, file_path="test-data/1.bed")
+
 
 WORKFLOW_SIMPLE = """
 class: GalaxyWorkflow
@@ -997,20 +1003,34 @@ steps:
 
     def test_update_name(self):
         original_name = "test update name"
+        readme = "This is the body of my readme..."
+        help = "This is my instruction for the workflow!"
+        logo_url = "https://galaxyproject.org/images/galaxy_logo_hub_white.svg"
+        doi = ["doi:10.1000/1"]
         workflow_object = self.workflow_populator.load_workflow(name=original_name)
         workflow_object["license"] = "AAL"
+        workflow_object["readme"] = readme
+        workflow_object["help"] = help
+        workflow_object["logo_url"] = logo_url
+        workflow_object["doi"] = doi
         upload_response = self.__test_upload(workflow=workflow_object, name=original_name)
         workflow = upload_response.json()
         workflow_id = workflow["id"]
         assert workflow["name"] == original_name
         workflow_dict = self.workflow_populator.download_workflow(workflow_id)
         assert workflow_dict["license"] == "AAL"
+        assert workflow_dict["readme"] == readme
 
         data = {"name": "my cool new name"}
         update_response = self._update_workflow(workflow["id"], data).json()
         assert update_response["name"] == "my cool new name"
         workflow_dict = self.workflow_populator.download_workflow(workflow_id)
+        # A rename copies the workflow to a new revision; the copy must not drop metadata.
         assert workflow_dict["license"] == "AAL"
+        assert workflow_dict["readme"] == readme
+        assert workflow_dict["help"] == help
+        assert workflow_dict["logo_url"] == logo_url
+        assert workflow_dict["doi"] == doi
 
     def test_update_name_for_workflow_with_subworkflows(self):
         workflow_id = self.workflow_populator.upload_yaml_workflow("""
@@ -1423,6 +1443,37 @@ steps:
             step_annotations = {step["annotation"] for step in imported_workflow["steps"].values()}
             assert "input1 description" in step_annotations
 
+    def test_long_annotations_round_trip(self):
+        # Multibyte on purpose: the bound counts characters, the dropped indexes counted bytes.
+        annotation = "\u00e9" * 30_000
+        workflow_id = self._upload_yaml_workflow(WORKFLOW_SIMPLE)
+        editable = self._download_workflow(workflow_id, style="editor")
+        editable["annotation"] = annotation
+        next(iter(editable["steps"].values()))["annotation"] = annotation
+        self._assert_status_code_is(self._update_workflow(workflow_id, editable), 200)
+
+        updated = self._download_workflow(workflow_id)
+        assert updated["annotation"] == annotation
+        assert annotation in {step["annotation"] for step in updated["steps"].values()}
+
+    @pytest.mark.parametrize("target", ["workflow", "step"])
+    @pytest.mark.parametrize("operation", ["import", "update"])
+    def test_annotation_size_limit(self, target, operation):
+        # Exact bound lives in galaxy.model; this covers both legacy write paths returning a 400.
+        oversized = "a" * 100_000
+        workflow_id = self._upload_yaml_workflow(WORKFLOW_SIMPLE)
+        editable = self._download_workflow(workflow_id, style="editor")
+        if target == "workflow":
+            editable["annotation"] = oversized
+        else:
+            next(iter(editable["steps"].values()))["annotation"] = oversized
+        if operation == "import":
+            response = self._post("workflows", data={"workflow": json.dumps(editable)})
+        else:
+            response = self._update_workflow(workflow_id, editable)
+        self._assert_status_code_is(response, 400)
+        assert_error_message_contains(response, "Annotation too large")
+
     def test_import_subworkflows(self):
         def get_subworkflow_content_id(workflow_id):
             workflow_contents = self._download_workflow(workflow_id, style="editor")
@@ -1468,8 +1519,8 @@ steps:
             other_import_response = self.__import_workflow(workflow_id)
             self._assert_status_code_is(other_import_response, 403)
 
-    def test_url_import(self, mock_http_server):
-        url = mock_http_server.get_url(
+    def test_url_import(self, test_http_server):
+        url = test_http_server.get_url(
             remote_url="https://raw.githubusercontent.com/galaxyproject/galaxy/release_19.09/test/base/data/test_workflow_1.ga",
             file_path="lib/galaxy_test/base/data/test_workflow_1.ga",
             content_type="application/json",
@@ -1895,6 +1946,31 @@ steps:
             self._assert_status_code_is(other_import_response, 200)
             workflow = self._download_workflow(other_import_response.json()["id"])
             assert workflow["steps"]["2"]["tool_version"] == "1.0.0"
+
+    def test_import_published_preserves_metadata(self):
+        name = "test_import_published_preserves_metadata"
+        readme = "This is the body of my readme..."
+        help = "This is my instruction for the workflow!"
+        logo_url = "https://galaxyproject.org/images/galaxy_logo_hub_white.svg"
+        doi = ["doi:10.1000/1"]
+        workflow_object = self.workflow_populator.load_workflow(name=name)
+        workflow_object["license"] = "AAL"
+        workflow_object["readme"] = readme
+        workflow_object["help"] = help
+        workflow_object["logo_url"] = logo_url
+        workflow_object["doi"] = doi
+        workflow_id = self.workflow_populator.create_workflow(workflow_object, publish=True)
+
+        with self._different_user():
+            import_response = self.__import_workflow(workflow_id, deprecated_route=False)
+            self._assert_status_code_is(import_response, 200)
+            # Importing a shared workflow copies it; the copy must not drop metadata.
+            imported_workflow = self._download_workflow(import_response.json()["id"])
+            assert imported_workflow["license"] == "AAL"
+            assert imported_workflow["readme"] == readme
+            assert imported_workflow["help"] == help
+            assert imported_workflow["logo_url"] == logo_url
+            assert imported_workflow["doi"] == doi
 
     def test_export(self):
         uploaded_workflow_id = self.workflow_populator.simple_workflow("test_for_export")
@@ -4482,17 +4558,6 @@ input_1:
             assert "History dataset collection association not found" in error_entry["error"]
 
     @skip_without_tool("cat1")
-    def test_export_invocation_bco(self):
-        with self.dataset_populator.test_history() as history_id:
-            summary = self._run_workflow(WORKFLOW_SIMPLE, test_data={"input1": "hello world"}, history_id=history_id)
-            invocation_id = summary.invocation_id
-            bco_path = self.workflow_populator.download_invocation_to_store(invocation_id, extension="bco.json")
-            with open(bco_path) as f:
-                bco = json.load(f)
-            self.workflow_populator.validate_biocompute_object(bco)
-            assert bco["provenance_domain"]["name"] == "Simple Workflow"
-
-    @skip_without_tool("cat1")
     def test_export_invocation_ro_crate(self):
         with self.dataset_populator.test_history() as history_id:
             summary = self._run_workflow(WORKFLOW_SIMPLE, test_data={"input1": "hello world"}, history_id=history_id)
@@ -5869,6 +5934,42 @@ test_data:
             )
             assert details["elements"][0]["object"]["file_ext"] == "csv"
 
+    @skip_without_tool("collection_creates_pair")
+    def test_change_datatype_static_collection_output(self):
+        # The collection here is structured up front, so its elements already exist when the
+        # action runs - the counterpart to test_change_datatype_discovered_outputs, where they
+        # do not and the action has to be deferred to discovery instead.
+        with self.dataset_populator.test_history() as history_id:
+            jobs_summary = self._run_workflow(
+                """
+class: GalaxyWorkflow
+inputs:
+  input: data
+steps:
+  split:
+    tool_id: collection_creates_pair
+    in:
+      input1: input
+    out:
+        paired_output:
+          change_datatype: csv
+outputs:
+  output:
+    outputSource: split/paired_output
+test_data:
+  input: "1\n2\n3\n4"
+""",
+                history_id=history_id,
+            )
+            inv = self.workflow_populator.get_invocation(jobs_summary.invocation_id, step_details=True)
+            details = self.dataset_populator.get_history_collection_details(
+                history_id=history_id, content_id=inv["output_collections"]["output"]["id"]
+            )
+            # Both, so that changing only the first element would still fail.
+            forward, reverse = details["elements"]
+            assert forward["object"]["file_ext"] == "csv"
+            assert reverse["object"]["file_ext"] == "csv"
+
     @skip_without_tool("collection_type_source_map_over")
     def test_mapping_and_subcollection_mapping(self):
         with self.dataset_populator.test_history() as history_id:
@@ -6721,8 +6822,7 @@ steps:
     def test_workflow_with_deleted_dataset_step_parameter(self):
         """Verify workflow fails gracefully when a step parameter references a deleted dataset.
 
-        Uses a pause step so we can delete the dataset after the invocation is
-        queued but before the cat step executes, avoiding a race condition.
+        The pause ensures deletion happens after the initial parameter validation.
         """
         with self.dataset_populator.test_history() as history_id:
             workflow_id = self._upload_yaml_workflow("""
@@ -6756,15 +6856,10 @@ steps:
                 },
                 inputs_by="name",
             )
-            # Wait for the scheduler to hit the pause step (invocation state "new" → "ready")
-            # before deleting, otherwise the scheduler may detect the deleted dataset
-            # on step 2 during scheduling and fail the invocation before we can resume.
-            self._wait_for_invocation_state(workflow_id, invocation_id, "ready")
-            # Invocation is paused — delete the dataset before resuming.
+            # Ensure the parameter override is initially valid before deleting its dataset.
+            assert self._wait_for_invocation_state(workflow_id, invocation_id, "ready")
+            # The scheduler revalidates the override while the invocation is paused.
             self.dataset_populator.delete_dataset(history_id=history_id, content_id=to_delete_id, purge=False)
-            # Resume the pause step. The cat step will now run and
-            # ToolModule.execute() → compute_runtime_state will find the deleted dataset.
-            self.__review_paused_steps(workflow_id, invocation_id, order_index=1, action=True)
             self.workflow_populator.wait_for_invocation_and_jobs(
                 history_id=history_id,
                 workflow_id=workflow_id,
@@ -7255,10 +7350,10 @@ data_input:
             content = self.dataset_populator.get_history_dataset_content(history_id)
             assert len(content.splitlines()) == 3, content
 
-    def test_run_with_default_file_dataset_input(self):
+    def test_run_with_default_file_dataset_input(self, test_http_server):
         with self.dataset_populator.test_history() as history_id:
             run_response = self._run_workflow(
-                WORKFLOW_WITH_DEFAULT_FILE_DATASET_INPUT,
+                WORKFLOW_WITH_DEFAULT_FILE_DATASET_INPUT.format(location=_default_file_location(test_http_server)),
                 history_id=history_id,
                 wait=True,
                 assert_ok=True,
@@ -7271,10 +7366,10 @@ data_input:
             assert dataset_details["file_ext"] == "txt"
             assert "chr1" in dataset_details["peek"]
 
-    def test_run_with_default_file_dataset_input_and_explicit_input(self):
+    def test_run_with_default_file_dataset_input_and_explicit_input(self, test_http_server):
         with self.dataset_populator.test_history() as history_id:
             run_response = self._run_workflow(
-                WORKFLOW_WITH_DEFAULT_FILE_DATASET_INPUT,
+                WORKFLOW_WITH_DEFAULT_FILE_DATASET_INPUT.format(location=_default_file_location(test_http_server)),
                 test_data="""
 default_file_input:
   value: 1.fasta
@@ -7295,10 +7390,10 @@ default_file_input:
                 in dataset_details["peek"]
             )
 
-    def test_run_with_default_file_in_step_inline(self):
+    def test_run_with_default_file_in_step_inline(self, test_http_server):
         with self.dataset_populator.test_history() as history_id:
             self._run_workflow(
-                WORKFLOW_WITH_STEP_DEFAULT_FILE_DATASET_INPUT,
+                WORKFLOW_WITH_STEP_DEFAULT_FILE_DATASET_INPUT.format(location=_default_file_location(test_http_server)),
                 history_id=history_id,
                 wait=True,
                 assert_ok=True,

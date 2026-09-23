@@ -151,11 +151,13 @@ def search(trans: ProvidesUserContext, q: str, page: int = 1, page_size: int = 1
     )
 
     results = repo_search.search(trans, search_term, page, page_size, boosts)
-    results["hostname"] = deprecated_hostname()
+    results["hostname"] = deprecated_hostname(app)
     return results
 
 
-def deprecated_hostname() -> str:
+def deprecated_hostname(app: ToolShedApp) -> str:
+    if tool_shed_url := app.config.tool_shed_url:
+        return tool_shed_url.rstrip("/") + "/"
     return web.url_for("/", qualified=True)
 
 
@@ -310,7 +312,7 @@ def index_repositories_paginated(
         page=index_request.page,
         page_size=index_request.page_size,
         hits=list(results),
-        hostname=deprecated_hostname(),
+        hostname=deprecated_hostname(app),
     )
 
 
@@ -385,7 +387,13 @@ def get_install_info(trans: ProvidesRepositoriesContext, name, owner, changeset_
                 includes_tools_for_display_in_tool_panel,
                 has_repository_dependencies,
                 has_repository_dependencies_only_if_compiling_contained_td,
-            ) = get_repo_info_dict(trans, encoded_repository_id, changeset_revision)
+            ) = get_repo_info_dict(
+                trans,
+                encoded_repository_id,
+                changeset_revision,
+                repository=repository,
+                repository_metadata=repository_metadata,
+            )
             return repository_dict, repository_metadata_dict, repo_info_dict
         else:
             log.debug(
@@ -522,7 +530,7 @@ def readmes(app: ToolShedApp, repository: Repository, changeset_revision: str) -
 
 
 def reset_metadata_on_repository(
-    trans: ProvidesUserContext,
+    trans: ProvidesRepositoriesContext,
     repository_id,
     dry_run: bool = False,
     verbose: bool = False,
@@ -530,7 +538,14 @@ def reset_metadata_on_repository(
 ) -> ResetMetadataOnRepositoryResponse:
     app: ToolShedApp = trans.app
 
-    def handle_repository(trans, start_time, repository, dry_run: bool, verbose: bool, clone_url: str | None = None):
+    def handle_repository(
+        trans: ProvidesRepositoriesContext,
+        start_time,
+        repository,
+        dry_run: bool,
+        verbose: bool,
+        clone_url: str | None = None,
+    ):
         results: dict = dict(start_time=start_time, repository_status=[], dry_run=dry_run)
         regenerated_metadata = {}
         try:
@@ -603,7 +618,7 @@ def reset_metadata_on_repositories(
     trans: ProvidesRepositoriesContext, request: ResetMetadataOnRepositoriesRequest
 ) -> ResetMetadataOnRepositoriesResponse:
 
-    def handle_repository(trans, repository, results):
+    def handle_repository(trans: ProvidesRepositoriesContext, repository, results):
         log.debug(f"Resetting metadata on repository {repository.name}")
         try:
             rmm = repository_metadata_manager.RepositoryMetadataManager(
