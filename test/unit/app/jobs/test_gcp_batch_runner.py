@@ -22,6 +22,7 @@ from galaxy.jobs.runners.util.gcp_batch import (
     parse_docker_volumes_param,
     parse_volume_spec,
     parse_volumes_param,
+    resolve_allowed_locations,
     resolve_gpu_count,
     resolve_max_run_duration,
     sanitize_label_value,
@@ -625,6 +626,57 @@ def _build_spec(destination_params, runner_params=None):
 
 # A GPU tool as TPV forwards it: every value arrives as an interpolated string.
 GPU_DESTINATION_PARAMS = {"gpus": "1", "cores": "32", "mem": "116"}
+
+
+class TestResolveAllowedLocations:
+    REGION = "us-east4"
+
+    def test_unset_means_no_restriction(self):
+        assert resolve_allowed_locations(None, self.REGION) == []
+        assert resolve_allowed_locations("", self.REGION) == []
+        assert resolve_allowed_locations(" , ", self.REGION) == []
+
+    def test_bare_zones_become_zone_paths_in_order_without_duplicates(self):
+        assert resolve_allowed_locations("us-east4-a, us-east4-c,us-east4-a", self.REGION) == [
+            "zones/us-east4-a",
+            "zones/us-east4-c",
+        ]
+
+    def test_paths_and_region_pass_through(self):
+        assert resolve_allowed_locations("zones/us-east4-b", self.REGION) == ["zones/us-east4-b"]
+        assert resolve_allowed_locations("us-east4", self.REGION) == ["regions/us-east4"]
+        assert resolve_allowed_locations("regions/us-east4", self.REGION) == ["regions/us-east4"]
+
+    @pytest.mark.parametrize("value", ["us-central1-a", "zones/us-central1-a", "regions/us-central1", "us-central1"])
+    def test_locations_outside_the_batch_region_are_rejected(self, value):
+        with pytest.raises(ValueError, match="NFS"):
+            resolve_allowed_locations(value, self.REGION)
+
+    @pytest.mark.parametrize("value", ["foo/bar", "zones/", "zones/us-east4-a/extra"])
+    def test_malformed_entries_are_rejected(self, value):
+        with pytest.raises(ValueError, match="Invalid allowed_locations"):
+            resolve_allowed_locations(value, self.REGION)
+
+
+class TestCreateBatchJobSpecAllowedLocations:
+    def test_no_location_policy_by_default(self):
+        job = _build_spec({})
+        assert not job.allocation_policy.location.allowed_locations
+
+    def test_runner_param_restricts_placement(self):
+        job = _build_spec({}, runner_params={"region": "us-east4", "allowed_locations": "us-east4-a,us-east4-c"})
+        assert list(job.allocation_policy.location.allowed_locations) == ["zones/us-east4-a", "zones/us-east4-c"]
+
+    def test_destination_param_overrides_runner_param(self):
+        job = _build_spec(
+            {"allowed_locations": "us-east4-c"},
+            runner_params={"region": "us-east4", "allowed_locations": "us-east4-a"},
+        )
+        assert list(job.allocation_policy.location.allowed_locations) == ["zones/us-east4-c"]
+
+    def test_zone_outside_region_fails_the_spec(self):
+        with pytest.raises(ValueError, match="NFS"):
+            _build_spec({"allowed_locations": "us-central1-a"}, runner_params={"region": "us-east4"})
 
 
 class TestCreateBatchJobSpecGpu:

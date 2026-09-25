@@ -382,6 +382,11 @@ runners:
   #  # project of the active credentials.
   #  #project_id: <gcp_project_id>
   #  #region: us-central1
+  #  # Zones within region that Batch may place VMs in; Batch uses whichever has
+  #  # capacity, which avoids single-zone stockouts (common for GPU shapes). Every
+  #  # VM must reach the NFS server, so zones outside region are rejected. Unset
+  #  # lets Batch choose any zone in the region.
+  #  #allowed_locations: us-central1-a,us-central1-c
   #  # Service account the Batch VMs run as.
   #  #service_account_email: <sa@project.iam.gserviceaccount.com>
   #  # Path to a service account key file for the Galaxy-side client (optional

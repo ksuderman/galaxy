@@ -39,6 +39,7 @@ from galaxy.jobs.runners.util.gcp_batch import (
     parse_volumes_param,
     POOLED_TASK_CONTAINER_TEMPLATE,
     render_pooled_wrapper_script,
+    resolve_allowed_locations,
     resolve_gpu_count,
     resolve_max_run_duration,
     sanitize_label_value,
@@ -71,6 +72,11 @@ __all__ = ("GoogleCloudBatchJobRunner",)
 RUNNER_PARAM_SPECS: dict[str, dict[str, Any]] = {
     "project_id": dict(map=str, default=None),
     "region": dict(map=str, default="us-central1"),
+    # Zones inside `region` that Batch may place VMs in, e.g. "us-east4-a,us-east4-c";
+    # Batch picks whichever has capacity, so listing several avoids single-zone
+    # stockouts (common for GPU shapes). Entries must lie within `region` so every
+    # VM can reach the NFS server. Unset: Batch chooses any zone in the region.
+    "allowed_locations": dict(map=str, default=None),
     "zone": dict(map=str, default=None),
     "service_account_file": dict(map=str, default=None),
     "service_account_email": dict(map=str, default=None),
@@ -493,6 +499,7 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         for key in [
             "project_id",
             "region",
+            "allowed_locations",
             "zone",
             "machine_type",
             "boot_disk_size_gb",
@@ -690,6 +697,12 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
 
         instance_template.policy = instance_policy
         allocation_policy.instances = [instance_template]
+
+        # Restrict placement to the configured zones (all inside the Batch region,
+        # so NFS stays reachable); Batch picks whichever has capacity.
+        if allowed_locations := resolve_allowed_locations(params.get("allowed_locations"), params["region"]):
+            allocation_policy.location = batch_v1.AllocationPolicy.LocationPolicy(allowed_locations=allowed_locations)
+            log.debug("Allowed locations %s for job %s", allowed_locations, job_wrapper.get_id_tag())
 
         # Configure service account for job execution
         if service_account_email := params.get("service_account_email"):
@@ -1038,6 +1051,10 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             if request.job.allocation_policy:
                 ap = request.job.allocation_policy
                 request_data["job"]["allocation_policy"] = {"instances": []}
+                if ap.location and ap.location.allowed_locations:
+                    request_data["job"]["allocation_policy"]["location"] = {
+                        "allowed_locations": list(ap.location.allowed_locations)
+                    }
 
                 for instance in ap.instances:
                     instance_data = {}

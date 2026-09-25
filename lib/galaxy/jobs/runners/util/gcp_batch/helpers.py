@@ -363,6 +363,63 @@ L4_GPU_MACHINE_TYPES = [
 SUPPORTED_L4_GPU_COUNTS = sorted({entry[2] for entry in L4_GPU_MACHINE_TYPES})
 
 
+def resolve_allowed_locations(value: str | None, region: str) -> list[str]:
+    """
+    Normalize the ``allowed_locations`` runner param to Batch location paths.
+
+    Batch places a job's VMs in any of the allowed locations that has capacity,
+    which is the main defence against a single zone being stocked out. Every VM
+    must still reach the NFS server, so only the Batch region itself and zones
+    inside it are accepted; cross-region NFS is refused rather than silently
+    tolerated.
+
+    Args:
+        value: comma-separated entries, each a bare zone (``us-east4-a``), a
+            ``zones/<zone>`` path, the bare region, or a ``regions/<region>`` path.
+            ``None`` or ``""`` means no restriction.
+        region: the Batch region jobs are submitted to.
+
+    Returns:
+        Location paths (``zones/us-east4-a``, ``regions/us-east4``) in input order,
+        duplicates removed. Empty when nothing was requested.
+
+    Raises:
+        ValueError: if an entry is malformed or lies outside ``region``.
+    """
+    if not value:
+        return []
+    locations: list[str] = []
+    for raw in str(value).split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if "/" in entry:
+            kind, _, name = entry.partition("/")
+            if kind not in ("zones", "regions") or not name or "/" in name:
+                raise ValueError(
+                    f"Invalid allowed_locations entry {entry!r}: expected a zone such as {region}-a "
+                    f"or the region {region}."
+                )
+        elif entry == region:
+            kind, name = "regions", entry
+        else:
+            kind, name = "zones", entry
+        if kind == "regions" and name != region:
+            raise ValueError(
+                f"allowed_locations entry {entry!r} is outside the Batch region {region}; "
+                "every Batch VM must reach the NFS server in that region."
+            )
+        if kind == "zones" and name.rsplit("-", 1)[0] != region:
+            raise ValueError(
+                f"allowed_locations entry {entry!r} is not a zone in the Batch region {region}; "
+                "every Batch VM must reach the NFS server in that region."
+            )
+        path = f"{kind}/{name}"
+        if path not in locations:
+            locations.append(path)
+    return locations
+
+
 def resolve_gpu_count(value):
     """
     Normalize a requested GPU quantity to a whole number of physical GPUs.
