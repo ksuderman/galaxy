@@ -19,7 +19,7 @@ fi
 # The container is named so the wrapper's cancel watcher can kill it, and the
 # whole run is bounded by the per-job walltime (the Batch max_run_duration
 # covers the VM lifetime, not this job, so the walltime is enforced here).
-timeout ${job_walltime_seconds} docker run --rm --name "galaxy-job-${galaxy_job_id}" ${docker_user_flag} \
+timeout ${job_walltime_seconds} docker run --rm --name "galaxy-job-${galaxy_job_id}" ${docker_user_flag} ${docker_gpu_flag} \
     -v "${nfs_mount_path}:${nfs_mount_path}:rw" \
     ${docker_volume_args} \
     -w "$$(dirname ${job_file})" \

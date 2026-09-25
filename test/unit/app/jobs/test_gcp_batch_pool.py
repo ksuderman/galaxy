@@ -261,6 +261,7 @@ class TestTemplateRendering:
             nfs_mount_path="/mnt/nfs",
             docker_volume_args="",
             docker_user_flag="",
+            docker_gpu_flag="",
             galaxy_slots=2,
             galaxy_memory_mb=2048,
             job_file="/mnt/nfs/jobs/7/galaxy_7.sh",
@@ -270,6 +271,42 @@ class TestTemplateRendering:
         assert "timeout 3600 docker run" in payload
         assert '--name "galaxy-job-7"' in payload
         assert "GALAXY_SLOTS=2" in payload and "GALAXY_MEMORY_MB=2048" in payload
+        assert "--gpus" not in payload
+
+    def test_pooled_task_payload_exposes_gpus_when_requested(self):
+        runner = _make_runner()
+        params = {
+            "gcp_batch_volumes": "10.0.0.1:/export:/mnt/nfs",
+            "docker_extra_volumes": None,
+            "galaxy_user_id": None,
+            "galaxy_group_id": None,
+        }
+        job_wrapper = SimpleNamespace(
+            job_id=7,
+            get_id_tag=lambda: "7",
+            tool=SimpleNamespace(id="cat1"),
+            get_resource_parameters=lambda: {},
+        )
+        runner._get_container_image = lambda _job_wrapper: "img:1"
+        ajs = SimpleNamespace(job_file="/mnt/nfs/jobs/7/galaxy_7.sh")
+
+        without = runner._render_task_payload(job_wrapper, ajs, params, 2000, 2048, 3600)
+        with_gpu = runner._render_task_payload(job_wrapper, ajs, params, 2000, 2048, 3600, gpus=1)
+
+        assert "--gpus" not in without
+        assert "docker run" in with_gpu and "--gpus all" in with_gpu
+
+    def test_pooled_dispatch_keys_gpu_jobs_on_g2_machine_type(self):
+        runner = _make_runner()
+        cpu_params = {"machine_type": "n2-standard-4"}
+        cpu_machine, uses_gpu = runner._resolve_machine_type(cpu_params, 4000, 8192, 0)
+        assert not uses_gpu and not cpu_machine.startswith("g2-")
+        gpu_machine, uses_gpu = runner._resolve_machine_type(cpu_params, 4000, 8192, 1)
+        assert uses_gpu and gpu_machine.startswith("g2-")
+        assert runner._resolve_machine_type({"machine_type": "g2-standard-8"}, 4000, 8192, 0) == (
+            "g2-standard-8",
+            True,
+        )
 
     def test_non_pooled_container_script_unchanged_by_settings_refactor(self):
         # Regression guard for the pool-off requirement: the non-pooled script
@@ -296,6 +333,7 @@ class TestTemplateRendering:
             galaxy_slots=2,
             galaxy_memory_mb=4096,
             docker_user_flag="--user 1000:1000",
+            docker_gpu_flag="",
             docker_volume_args=(
                 '-v "/cvmfs/data.galaxyproject.org:/cvmfs/data.galaxyproject.org:ro" '
                 '-v "/cvmfs/cloud.galaxyproject.org:/cvmfs/cloud.galaxyproject.org:ro"'
