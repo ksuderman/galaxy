@@ -24,6 +24,7 @@ from galaxy.jobs.runners.util.gcp_batch import (
     resolve_max_run_duration,
     sanitize_label_value,
 )
+from galaxy.managers.admin_settings import AdminSettingsManager
 
 
 class TestSanitizeLabelValue:
@@ -364,14 +365,37 @@ class TestMonitorSleepTime:
         assert runner.monitor_sleep_time == 30
 
 
-def _make_runner(runner_params=None):
+def _make_runner(runner_params=None, admin_settings=None):
     """Build a GoogleCloudBatchJobRunner without running __init__ (no GCP client).
 
-    _get_job_params only depends on self.runner_params, so we set that directly.
+    _get_job_params depends on self.runner_params and, for Admin panel overrides, on
+    resolving AdminSettingsManager from the app container; the fake container resolves
+    nothing unless a test installs ``admin_settings``.
     """
     runner = object.__new__(GoogleCloudBatchJobRunner)
     runner.runner_params = RunnerParams(specs=RUNNER_PARAM_SPECS, params=runner_params or {})
+    runner.app = cast(Any, _FakeContainerApp(admin_settings))
     return runner
+
+
+class _FakeAdminSettings:
+    """In-memory stand-in for AdminSettingsManager: a plain mapping of key to saved value."""
+
+    def __init__(self, values: dict[str, Any]):
+        self.values = values
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.values.get(key, default)
+
+
+class _FakeContainerApp:
+    def __init__(self, admin_settings: dict[str, Any] | None):
+        self._admin_settings = _FakeAdminSettings(admin_settings) if admin_settings is not None else None
+
+    def resolve_or_none(self, dep_type):
+        if dep_type is AdminSettingsManager:
+            return self._admin_settings
+        return None
 
 
 # Keys that _get_job_params copies from the destination / runner config. Derived
@@ -429,3 +453,34 @@ class TestGetJobParams:
         params = runner._get_job_params(destination)
 
         assert params["job_id_prefix"] == "from-destination"
+
+
+class TestAdminSettingsOverrides:
+    """Precedence in _get_job_params: destination param, then Admin panel setting, then runner config."""
+
+    DESTINATION = SimpleNamespace(params={"max_run_duration": "60s"})
+
+    def test_admin_setting_overrides_runner_config(self):
+        runner = _make_runner({"max_retry_count": 1}, admin_settings={"gcp_batch.max_retry_count": 4})
+        params = runner._get_job_params(SimpleNamespace(params={}))
+        assert params["max_retry_count"] == 4
+
+    def test_destination_param_beats_admin_setting(self):
+        runner = _make_runner(admin_settings={"gcp_batch.max_run_duration": "3600s"})
+        params = runner._get_job_params(self.DESTINATION)
+        assert params["max_run_duration"] == "60s"
+
+    def test_admin_setting_applies_to_keys_the_destination_leaves_unset(self):
+        runner = _make_runner(admin_settings={"gcp_batch.max_run_duration": "3600s"})
+        params = runner._get_job_params(SimpleNamespace(params={}))
+        assert params["max_run_duration"] == "3600s"
+
+    def test_no_settings_manager_falls_back_to_runner_config(self):
+        runner = _make_runner({"max_retry_count": 2})
+        params = runner._get_job_params(SimpleNamespace(params={}))
+        assert params["max_retry_count"] == 2
+
+    def test_settings_keys_are_prefixed_with_the_runner_name(self):
+        runner = _make_runner({"max_retry_count": 2}, admin_settings={"max_retry_count": 9})
+        params = runner._get_job_params(SimpleNamespace(params={}))
+        assert params["max_retry_count"] == 2

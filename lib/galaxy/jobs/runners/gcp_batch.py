@@ -37,8 +37,12 @@ from galaxy.jobs.runners.util.gcp_batch import (
     resolve_max_run_duration,
     sanitize_label_value,
 )
+from galaxy.managers.admin_settings import AdminSettingsManager
 
 log = logging.getLogger(__name__)
+
+# Prefix of the Admin panel settings keys this runner reads: gcp_batch.<runner param name>.
+ADMIN_SETTINGS_PREFIX = "gcp_batch."
 
 __all__ = ("GoogleCloudBatchJobRunner",)
 
@@ -242,8 +246,24 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             log.error("Failed to create Batch job: %s", e)
             raise
 
+    def _admin_setting(self, key: str) -> Any:
+        """Return the value an admin saved for runner param ``key`` from the Admin panel, or None.
+
+        The runner owns the settings keys it reads; each is ``gcp_batch.<param name>``,
+        declared by an Admin panel extension form. Runners are built by the framework
+        with ``app``, so the settings manager is resolved from the container by type.
+        """
+        manager = self.app.resolve_or_none(AdminSettingsManager)
+        if manager is None:
+            return None
+        return manager.get(f"{ADMIN_SETTINGS_PREFIX}{key}")
+
     def _get_job_params(self, job_destination) -> dict[str, Any]:
-        """Extract job parameters from destination and runner configuration."""
+        """Extract job parameters from destination and runner configuration.
+
+        Precedence per key: destination param, then a value saved from the Admin
+        panel (see :meth:`_admin_setting`), then the runner-level value or its default.
+        """
         log.debug("Starting _get_job_params")
         params = {}
 
@@ -272,10 +292,17 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
             "service_account_email",
             "job_id_prefix",
         ]:
+            if key in job_destination.params:
+                params[key] = job_destination.params[key]
+                continue
+            admin_value = self._admin_setting(key)
+            if admin_value is not None:
+                params[key] = admin_value
+                continue
             # Subscript access on runner_params (a defaultdict) so unset keys fall
             # back to the spec defaults defined in runner_param_specs; .get() would
             # bypass __missing__ and yield None instead of the configured default.
-            params[key] = job_destination.params.get(key, self.runner_params[key])
+            params[key] = self.runner_params[key]
 
         log.debug("Finished _get_job_params")
         return params

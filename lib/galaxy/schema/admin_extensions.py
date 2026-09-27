@@ -158,12 +158,6 @@ def _check_bounds(input_def: AdminExtensionFormInput, number: float) -> None:
         raise ValueError(f"{input_def.name}: must be at most {input_def.max:g}")
 
 
-class AdminExtensionSettings(Model):
-    """Current values of a form item's inputs, keyed by input name."""
-
-    values: dict[str, SettingValue] = Field(..., description="Value per input name.")
-
-
 class AdminExtensionFormResponse(Model):
     """A form item rendered for the client's generic form component."""
 
