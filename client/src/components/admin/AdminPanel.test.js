@@ -22,6 +22,10 @@ vi.mock("vue-router/composables", () => ({
     useRoute: vi.fn(() => ({})),
 }));
 
+vi.mock("@/onload/loadConfig", () => ({
+    getAppRoot: () => "/galaxy/",
+}));
+
 function createTarget(propsData = {}, extensions = []) {
     const pinia = createTestingPinia({ stubActions: true, createSpy: vi.fn });
     const store = useAdminExtensionsStore(pinia);
@@ -97,5 +101,19 @@ describe("AdminPanel", () => {
         expect(external.attributes("href")).toBe("https://example.org");
         expect(external.attributes("target")).toBe("_blank");
         expect(external.text()).toBe("Docs");
+    });
+
+    it("resolves a relative new_tab URL against the app root", async () => {
+        const extensions = [
+            {
+                id: "anvil",
+                section: "AnVIL",
+                items: [{ id: "monitor", type: "link", title: "Cluster Monitor", url: "/monitor", target: "new_tab" }],
+            },
+        ];
+        const wrapper = createTarget({}, extensions);
+        await flushPromises();
+
+        expect(wrapper.find("a#admin-link-ext-anvil-monitor").attributes("href")).toBe("/galaxy/monitor");
     });
 });
