@@ -354,6 +354,9 @@ def _make_runner(runner_params=None):
     """Build a GoogleCloudBatchJobRunner without running __init__ (no GCP client)."""
     runner = object.__new__(GoogleCloudBatchJobRunner)
     runner.runner_params = RunnerParams(specs=RUNNER_PARAM_SPECS, params=runner_params or {})
+    # No Admin panel settings: the fake container resolves nothing, so
+    # _get_job_params falls through to destination and runner values.
+    runner.app = cast(Any, SimpleNamespace(resolve_or_none=lambda dep_type: None))
     runner._vm_pool = VMPool()
     runner.work_queue = cast(Any, _RecordingQueue())
     runner.monitor_queue = cast(Any, _RecordingQueue())

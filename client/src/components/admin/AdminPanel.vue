@@ -43,7 +43,7 @@ const extensionSections = computed<PanelSection[]>(() => {
         title: extension.section,
         items: extension.items.map((item) => {
             const id = `admin-link-ext-${extension.id}-${item.id}`;
-            if (item.target === "new_tab") {
+            if (item.type === "link" && item.target === "new_tab") {
                 // Plain <a href> bypasses the router, so apply the app root here;
                 // framed items get it from CenterFrame.
                 return { id, title: item.title, href: withPrefix(item.url) };
