@@ -1219,7 +1219,11 @@ class GoogleCloudBatchJobRunner(AsynchronousJobRunner):
         if os.path.exists(done_path):
             log.info("Pooled job %s finished on VM %s", job_state.job_wrapper.get_id_tag(), vm_id)
             job_state.running = False
-            job_state.job_wrapper.change_state(model.Job.states.OK)
+            # Do not change_state(OK) here: it marks the output datasets ok and
+            # the handler dispatches consumers before finish() has moved the
+            # outputs into the object store, so they read empty placeholders.
+            # mark_as_finished -> finish() sets the states once the files are
+            # in place, as the non-pooled path above already relies on.
             self.mark_as_finished(job_state)
             try:
                 os.remove(done_path)
